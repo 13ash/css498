@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package rsdfs.proto;
+
+message Operation {
+  enum OpCode {
+    READ_BLOCK = 0;
+    WRITE_BLOCK = 1;
+  }
+
+  OpCode op_code = 1;
+}

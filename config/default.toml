@@ -1,0 +1,7 @@
+[namenode]
+rpc_bind_host = "0.0.0.0"
+rpc_port = 44000
+name_dir = "/tmp/rs-dfs/namenode"
+
+[datanode]
+data_dir = "/tmp/rs-dfs/datanode"

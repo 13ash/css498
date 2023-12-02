@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package rsdfs.proto;
+
+message EmptyMessage {}
+
+enum BlockState {
+  DEFAULT = 0;
+  UNDER_CONSTRUCTION = 1;
+  READY = 2;
+  CORRUPTED = 3;
+}
+
+message Block {
+  uint64 id = 1;
+  uint32 size = 2;
+  uint64 creation_time = 5;
+  uint64 last_modified = 6;
+  uint64 last_accessed = 7;
+  BlockState state = 8;
+
+}

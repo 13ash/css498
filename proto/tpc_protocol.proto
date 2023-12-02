@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package rsdfs.proto;
+
+// Message sent by the coordinator to start the prepare phase (voting phase)
+message PrepareRequest {
+  string transaction_id = 1;
+}
+
+// Response from participants for the prepare request, indicating their vote
+message PrepareResponse {
+  string transaction_id = 1;
+  VoteDecision vote = 2;
+}
+
+message Empty {
+
+}
+
+// Enum to represent the voting decision of the participant
+enum VoteDecision {
+  UNKNOWN = 0; // Default value, should not be used
+  VOTE_COMMIT = 1; // Participant is ready to commit
+  VOTE_ABORT = 2; // Participant decides to abort
+}
+
+// Message sent by the coordinator to finalize the transaction
+message FinalDecision {
+  string transaction_id = 1;
+  bool commit = 2; // true for commit, false for abort
+}
+
+// The 2PC service definition
+service TwoPhaseCommit {
+  // Prepare phase - coordinator to participants
+  rpc Prepare(PrepareRequest) returns (PrepareResponse);
+
+  // Commit/Abort phase - coordinator to participants
+  rpc Finalize(FinalDecision) returns (Empty);
+}
