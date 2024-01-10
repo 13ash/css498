@@ -1,4 +1,17 @@
+/*
+  client_protocol is an RPC protocol that the hdfs clients uses to communicate with the NameNode
+
+  The client_protocol supports file operations and directory operations
+
+  1. File Operations: open, create, delete, append, rename
+  2. Directory Operations: mkdir, ls, get_metadata, is_directory
+ */
+
 syntax = "proto3";
 
-package rsdfs.proto;
+package rs_hdfs.proto;
+
+service ClientProtocol {
+
+}
 

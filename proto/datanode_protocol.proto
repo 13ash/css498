@@ -1,0 +1,24 @@
+/*
+  datanode_protocol is an RPC protocol that the datanodes use to talk to the NameNode
+
+  The DataNodes in the cluster send two types of messages to the NameNode:
+
+  1. HeartBeat - A signal sent to the NameNode that lets the NameNode know the DataNode is still alive
+                 this information is used by the NameNode to determine whether or not to use a particular
+                 DataNode's block.
+
+                 The signal interval is configurable but defaults to 3 seconds.
+
+
+  2. Block Report - A message sent to the NameNode with information about the DataNode's block.
+                    BlockID, TimeStamp, BlockSize, Replications
+
+ */
+
+syntax = "proto3";
+
+package rs_hdfs.proto;
+
+service DataNodeProtocol {
+
+}

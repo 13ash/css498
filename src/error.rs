@@ -1,29 +1,31 @@
+
+
 #[derive(Debug, PartialEq)]
-pub enum RSDFSError {
+pub enum RSHDFSError {
     ConfigError(String),
     ProtoError(String),
     FileSystemError(String),
-
+    InsufficientSpace(String),
 }
 
 
-impl From<toml::de::Error> for RSDFSError {
+impl From<toml::de::Error> for RSHDFSError {
     fn from(error: toml::de::Error) -> Self {
-        RSDFSError::ConfigError(error.to_string())
+        RSHDFSError::ConfigError(error.to_string())
     }
 }
 
 
-impl From<prost::EncodeError> for RSDFSError {
+impl From<prost::EncodeError> for RSHDFSError {
     fn from(error: prost::EncodeError) -> Self {
-        RSDFSError::ProtoError(error.to_string())
+        RSHDFSError::ProtoError(error.to_string())
     }
 }
 
-impl From<prost::DecodeError> for RSDFSError {
+impl From<prost::DecodeError> for RSHDFSError {
     fn from(error: prost::DecodeError) -> Self {
-        RSDFSError::ProtoError(error.to_string())
+        RSHDFSError::ProtoError(error.to_string())
     }
 }
 
-pub type Result<T> = std::result::Result<T, RSDFSError>;
+pub type Result<T> = std::result::Result<T, RSHDFSError>;

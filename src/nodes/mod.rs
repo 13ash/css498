@@ -1,3 +1,0 @@
-
-mod datanode;
-mod namenode;
