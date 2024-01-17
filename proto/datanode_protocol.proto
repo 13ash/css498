@@ -19,6 +19,14 @@ syntax = "proto3";
 
 package rs_hdfs.proto;
 
-service DataNodeProtocol {
+service DataNode {
+  rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
+}
 
+message HeartBeatRequest {
+  uint64 datanode_id = 1;
+}
+
+message HeartBeatResponse {
+  bool success = 1;
 }

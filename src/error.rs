@@ -6,6 +6,7 @@ pub enum RSHDFSError {
     ProtoError(String),
     FileSystemError(String),
     InsufficientSpace(String),
+    HeartBeatFailed(String),
 }
 
 
