@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
 use crate::proto::data_node_client::DataNodeClient;
-use crate::proto::HeartBeatRequest;
+use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse};
 use tonic::transport::Channel;
 use crate::error::{RSHDFSError};
 
@@ -18,6 +18,10 @@ use crate::error::{RSHDFSError};
 ///
 /// Handling client requests for block data
 
+struct BlockManager {
+
+
+}
 
 struct HeartbeatManager {
     datanode_service_client: Arc<Mutex<DataNodeClient<Channel>>>,
@@ -66,4 +70,21 @@ impl HeartbeatManager {
 
 pub struct DataNode {
     id: u64,
+}
+
+impl DataNode {
+    pub async fn register_with_namenode(&self, data_node_client: &mut DataNodeClient<Channel>) -> Result<RegistrationResponse, RSHDFSError> {
+        let registration_request = RegistrationRequest {
+            datanode_id: self.id,
+        };
+
+        match (data_node_client.register_with_namenode(registration_request.clone()).await) {
+            Ok(response) => {
+                Ok(response.into_inner())
+            }
+            Err(e) => {
+                Err(RSHDFSError::RegistrationFailed(String::from("Registration with the namenode failed.")))
+            }
+        }
+    }
 }
