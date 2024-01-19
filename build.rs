@@ -4,7 +4,7 @@ fn main() {
         .compile(
             &[
                 "proto/client_protocol.proto",
-                "proto/datanode_protocol.proto"
+                "proto/datanode_protocol.proto",
             ],
             &["proto"],
         )

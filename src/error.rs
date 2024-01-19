@@ -1,12 +1,15 @@
-
+use std::io::Error;
 
 #[derive(Debug, PartialEq)]
 pub enum RSHDFSError {
     ConfigError(String),
+    ConnectionError(String),
     ProtoError(String),
     FileSystemError(String),
+    IOError(String),
     InsufficientSpace(String),
     HeartBeatFailed(String),
+    RegistrationFailed(String)
 }
 
 
@@ -16,11 +19,21 @@ impl From<toml::de::Error> for RSHDFSError {
     }
 }
 
+impl From<std::io::Error> for RSHDFSError {
+    fn from(error: std::io::Error) -> Self {
+        RSHDFSError::IOError(error.to_string())
+    }
+}
+
 
 impl From<prost::EncodeError> for RSHDFSError {
     fn from(error: prost::EncodeError) -> Self {
         RSHDFSError::ProtoError(error.to_string())
     }
+}
+
+impl From<serde_xml_rs::Error> for RSHDFSError {
+    fn from(error: serde_xml_rs::Error) -> Self {RSHDFSError::ConfigError(error.to_string())}
 }
 
 impl From<prost::DecodeError> for RSHDFSError {

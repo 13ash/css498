@@ -1,10 +1,14 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
+use tonic::transport::{Channel, Uri};
+use uuid::Uuid;
+use crate::config::datanode_config::DataNodeConfig;
 use crate::proto::data_node_client::DataNodeClient;
 use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse};
-use tonic::transport::Channel;
+
 use crate::error::{RSHDFSError};
 
 
@@ -27,11 +31,11 @@ struct HeartbeatManager {
     datanode_service_client: Arc<Mutex<DataNodeClient<Channel>>>,
     interval: Duration,
     running: bool,
-    id: u64,
+    id: Uuid,
 }
 
 impl HeartbeatManager {
-    fn new(datanode_service_client: DataNodeClient<Channel>, interval: Duration, id: u64) -> Self {
+    fn new(datanode_service_client: DataNodeClient<Channel>, interval: Duration, id: Uuid) -> Self {
         HeartbeatManager {
             datanode_service_client: Arc::new(Mutex::new(datanode_service_client)),
             interval,
@@ -45,7 +49,7 @@ impl HeartbeatManager {
         let client = self.datanode_service_client.clone();
         let interval = self.interval;
         let request = HeartBeatRequest {
-            datanode_id: self.id
+            datanode_id: self.id.to_string()
         };
 
         tokio::spawn(async move {
@@ -68,14 +72,20 @@ impl HeartbeatManager {
 }
 
 
+
 pub struct DataNode {
-    id: u64,
+    id: Uuid,
+    data_dir: String,
+    heartbeat_interval: Duration,
+    block_report_interval: Duration,
+    addr: String,
+    heartbeat_manager: HeartbeatManager,
 }
 
 impl DataNode {
     pub async fn register_with_namenode(&self, data_node_client: &mut DataNodeClient<Channel>) -> Result<RegistrationResponse, RSHDFSError> {
         let registration_request = RegistrationRequest {
-            datanode_id: self.id,
+            datanode_id: self.id.to_string(),
         };
 
         match (data_node_client.register_with_namenode(registration_request.clone()).await) {
@@ -86,5 +96,24 @@ impl DataNode {
                 Err(RSHDFSError::RegistrationFailed(String::from("Registration with the namenode failed.")))
             }
         }
+    }
+
+    pub async fn from_config(config: DataNodeConfig) -> Result<Self, RSHDFSError> {
+        let uri = Uri::from_str(&config.ipc_address)
+            .map_err(|_| RSHDFSError::ConfigError("Invalid URI for DataNode address".to_string()))?;
+
+        let channel = Channel::builder(uri)
+            .connect_lazy();
+        let client = DataNodeClient::new(channel);
+        let id = Uuid::new_v4();
+
+        Ok(DataNode {
+            id,
+            data_dir: config.data_dir,
+            heartbeat_interval: Duration::from_millis(config.heartbeat_interval),
+            block_report_interval: Duration::from_millis(config.block_report_interval),
+            addr: config.ipc_address,
+            heartbeat_manager: HeartbeatManager::new(client, Duration::from_millis(config.heartbeat_interval), id)
+        })
     }
 }

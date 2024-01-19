@@ -2,7 +2,6 @@
 name = "rs_hdfs"
 version = "0.1.0"
 edition = "2021"
-
 [[bin]]
 name = "rs_hdfs_datanode"
 path = "src/bin/datanode.rs"
@@ -25,7 +24,9 @@ prost = "0.12.3"
 prost-types = "0.12.3"
 tonic = "0.10.2"
 serde = { version = "1.0.193", features = ["derive"] }
+serde-xml-rs = "0.6.0"
 adler32 = "1.2.0"
+uuid = { version = "1.6.1", features = ["v4", "fast-rng"] }
 
 [build-dependencies]
 tonic-build = "0.10.2"

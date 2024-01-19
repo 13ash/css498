@@ -25,7 +25,7 @@ service DataNode {
 }
 
 message HeartBeatRequest {
-  uint64 datanode_id = 1;
+  string datanode_id = 1;
 }
 
 message HeartBeatResponse {
@@ -33,7 +33,7 @@ message HeartBeatResponse {
 }
 
 message RegistrationRequest {
-  uint64 datanode_id = 1;
+  string datanode_id = 1;
 }
 
 message RegistrationResponse {
