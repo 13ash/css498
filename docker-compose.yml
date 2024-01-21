@@ -2,24 +2,24 @@ version: '3.8'
 
 services:
   namenode:
-    image: rshdfs-namenode  # Use the image name you used when building the NameNode image
+    image: rshdfs-namenode
     hostname: namenode  # Set the hostname for the NameNode
     ports:
-      - "50000:50000"  # Map the port from the host to the container (adjust if necessary)
+      - "50000:50000"
     volumes:
-      - ./config/namenode.xml:/config/namenode.xml  # Optional: Mount the configuration file if needed
-      - namenode-data:/hdfs/namenode  # Mount a volume for persistent NameNode data
+      - ./config/namenode.xml:/config/namenode.xml
+      - namenode-data:/hdfs/namenode
 
   datanode:
-    image: rshdfs-datanode  # Use the image name you used when building the DataNode image
+    image: rshdfs-datanode
     ports:
-      - "50002:50002"  # Map the port from the host to the container (adjust if necessary)
+      - "50002:50002"
     volumes:
-      - ./config/datanode.xml:/config/datanode.xml  # Optional: Mount the configuration file if needed
-      - datanode-data:/hdfs/data  # Mount a volume for persistent DataNode data
+      - ./config/datanode.xml:/config/datanode.xml
+      - datanode-data:/hdfs/data
     environment:
-      - NAMENODE_HOST=namenode  # Set the NameNode hostname for the DataNode to use
+      - NAMENODE_HOST=namenode
 
 volumes:
-  namenode-data:  # Define the volume for storing NameNode data
-  datanode-data:  # Define the volume for storing DataNode data
+  namenode-data:
+  datanode-data:
