@@ -1,5 +1,5 @@
-mod namenode;
+mod block_map;
 mod edit_log;
 mod fs_image;
-mod block_map;
+pub mod namenode;
 mod namespace;

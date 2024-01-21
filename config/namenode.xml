@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<nameNodeConfig>
+    <data.dir>/hdfs/namenode</data.dir>
+    <ipc.address>127.0.0.1:50000</ipc.address>
+    <checkpoint.period>3600</checkpoint.period>
+    <handler.count>100</handler.count>
+</nameNodeConfig>

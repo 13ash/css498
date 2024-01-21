@@ -19,7 +19,7 @@ syntax = "proto3";
 
 package rs_hdfs.proto;
 
-service DataNode {
+service DataNodeService {
   rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
   rpc RegisterWithNamenode(RegistrationRequest) returns (RegistrationResponse) {}
 }
