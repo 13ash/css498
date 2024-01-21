@@ -2,12 +2,11 @@ use crate::config::datanode_config::DataNodeConfig;
 use crate::proto::data_node_service_client::DataNodeServiceClient;
 use crate::proto::data_node_service_server::DataNodeService;
 use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
-use tonic::transport::{Channel, Uri};
+use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
 use crate::error::RSHDFSError;
@@ -58,13 +57,13 @@ impl HeartbeatManager {
             loop {
                 interval_timer.tick().await;
                 let mut client_guard = client.lock().await;
+                println!("Sending heartbeat.");
                 match client_guard.send_heart_beat(request.clone()).await {
                     Ok(response) => {
                         response.into_inner();
                     }
                     Err(_e) => {
                         RSHDFSError::HeartBeatFailed(String::from("Heartbeat Failed."));
-                        break;
                     }
                 }
             }
@@ -105,14 +104,13 @@ impl DataNode {
 
     pub async fn from_config(config: DataNodeConfig) -> Result<Self, RSHDFSError> {
         println!("Attempting to establish connection with: {}", config.namenode_address);
-
-        let uri = Uri::from_str("namenode:50000").map_err(|_| {
-            RSHDFSError::ConfigError("Invalid URI for NameNode address".to_string())
-        })?;
-        let channel = Channel::builder(uri).connect().await?;
         let id = Uuid::new_v4();
-        let client = Arc::new(Mutex::new(DataNodeServiceClient::new(channel)));
-        let heartbeat_client = Arc::clone(&client);
+        let ipc_address = config.ipc_address.clone();
+        let namenode_addr = config.namenode_address.clone();
+        let endpoint = Endpoint::from_shared(format!("http://{}",config.namenode_address))?;
+        let client= DataNodeServiceClient::connect(endpoint).await?;
+        let wrapped_client = Arc::new(Mutex::new(client));
+        let heartbeat_client= wrapped_client.clone();
         let heartbeat_manager = HeartbeatManager::new(
             heartbeat_client,
             Duration::from_millis(config.heartbeat_interval),
@@ -121,12 +119,12 @@ impl DataNode {
 
         Ok(DataNode {
             id,
-            client,
+            client: wrapped_client,
             data_dir: config.data_dir,
             heartbeat_interval: Duration::from_millis(config.heartbeat_interval),
             block_report_interval: Duration::from_millis(config.block_report_interval),
-            addr: config.ipc_address,
-            namenode_addr: config.namenode_address,
+            addr: ipc_address,
+            namenode_addr,
             heartbeat_manager,
         })
     }
@@ -136,8 +134,8 @@ impl DataNode {
         let mut client_guard = self.client.lock().await;
         let registration_response = self.register_with_namenode(&mut client_guard).await?;
         drop(client_guard);
-
         println!("Registered with NameNode: {:?}", registration_response);
+        println!("Starting Heartbeat...");
 
         // Step 2: Start HeartbeatManager
         self.heartbeat_manager.start().await;

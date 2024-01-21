@@ -21,6 +21,9 @@ RUN cargo build --release
 # Use Ubuntu as the base image for the final image
 FROM ubuntu:22.04 as final
 
+EXPOSE 50000
+
+
 # Install net-tools
 RUN apt-get update \
     && apt-get install -y net-tools \
