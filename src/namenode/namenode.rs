@@ -53,10 +53,13 @@ impl DataNodeService for NameNode {
         request: Request<RegistrationRequest>,
     ) -> Result<Response<RegistrationResponse>, Status> {
         println!(
-            "Received registration from {:?}",
-            request.into_inner().datanode_id
+            "Received registration {:?}",
+            request
         );
-        let response = RegistrationResponse { success: true };
+        let unwrapped_request = request.into_inner().health_metrics.unwrap();
+        let success = unwrapped_request.cpu_load < 3.0 && unwrapped_request.memory_usage < 50.0 ;
+        let response = RegistrationResponse {
+            success};
         Ok(Response::new(response))
     }
 }

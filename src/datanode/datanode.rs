@@ -1,14 +1,14 @@
 use crate::config::datanode_config::DataNodeConfig;
 use crate::proto::data_node_service_client::DataNodeServiceClient;
 use crate::proto::data_node_service_server::DataNodeService;
-use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse};
+use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse, NodeHealthMetrics};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time;
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
-
+use sysinfo::System;
 use crate::error::RSHDFSError;
 
 /// Responsibilities
@@ -50,6 +50,7 @@ impl HeartbeatManager {
         let interval = self.interval;
         let request = HeartBeatRequest {
             datanode_id: self.id.to_string(),
+
         };
 
         tokio::spawn(async move {
@@ -60,6 +61,7 @@ impl HeartbeatManager {
                 println!("Sending heartbeat.");
                 match client_guard.send_heart_beat(request.clone()).await {
                     Ok(response) => {
+                        println!("{:?}",response);
                         response.into_inner();
                     }
                     Err(_e) => {
@@ -83,12 +85,17 @@ pub struct DataNode {
 }
 
 impl DataNode {
+
     async fn register_with_namenode(
         &self,
         data_node_client: &mut DataNodeServiceClient<Channel>,
     ) -> Result<RegistrationResponse, RSHDFSError> {
+        let node_health_metrics = gather_metrics().await?;
         let registration_request = RegistrationRequest {
-            datanode_id: self.id.to_string(),
+            datanode_id: self.id.clone().to_string(),
+            addr: self.addr.clone(),
+            health_metrics: Some(node_health_metrics),
+
         };
 
         match data_node_client
@@ -143,4 +150,17 @@ impl DataNode {
         // Return Ok if everything is initialized properly
         Ok(())
     }
+}
+
+async fn gather_metrics() -> Result<NodeHealthMetrics, RSHDFSError> {
+    let mut system = System::new_all();
+    system.refresh_all();
+
+    let cpu_load = system.global_cpu_info().cpu_usage() as f64;
+    let memory_usage = system.used_memory() as f64 / system.available_memory() as f64 * 100.0;
+
+    Ok(NodeHealthMetrics {
+        cpu_load,
+        memory_usage,
+    })
 }
