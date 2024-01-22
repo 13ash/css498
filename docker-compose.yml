@@ -10,16 +10,38 @@ services:
       - ./config/namenode.xml:/config/namenode.xml
       - namenode-data:/hdfs/namenode
 
-  datanode:
+  datanode1:
     image: rshdfs-datanode
     ports:
       - "50002:50002"
     volumes:
       - ./config/datanode.xml:/config/datanode.xml
-      - datanode-data:/hdfs/data
+      - datanode1-data:/hdfs/data
+    environment:
+      - NAMENODE_HOST=namenode
+
+  datanode2:
+    image: rshdfs-datanode
+    ports:
+      - "50003:50002"
+    volumes:
+      - ./config/datanode.xml:/config/datanode.xml
+      - datanode2-data:/hdfs/data
+    environment:
+      - NAMENODE_HOST=namenode
+
+  datanode3:
+    image: rshdfs-datanode
+    ports:
+      - "50004:50002"
+    volumes:
+      - ./config/datanode.xml:/config/datanode.xml
+      - datanode3-data:/hdfs/data
     environment:
       - NAMENODE_HOST=namenode
 
 volumes:
   namenode-data:
-  datanode-data:
+  datanode1-data:
+  datanode2-data:
+  datanode3-data:

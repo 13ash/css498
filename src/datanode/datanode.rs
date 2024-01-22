@@ -1,28 +1,25 @@
+use crate::block::Block;
 use crate::config::datanode_config::DataNodeConfig;
+use crate::error::RSHDFSError;
 use crate::proto::data_node_service_client::DataNodeServiceClient;
 use crate::proto::data_node_service_server::DataNodeService;
-use crate::proto::{HeartBeatRequest, RegistrationRequest, RegistrationResponse, NodeHealthMetrics};
+use crate::proto::{
+    HeartBeatRequest, NodeHealthMetrics, RegistrationRequest, RegistrationResponse,
+};
 use std::sync::Arc;
 use std::time::Duration;
+use sysinfo::System;
 use tokio::sync::Mutex;
 use tokio::time;
 use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
-use sysinfo::System;
-use crate::error::RSHDFSError;
 
-/// Responsibilities
-///
-/// Registering with the NameNode
-///
-/// Handling block management operations (reading, writing, replicating)
-///
-/// Sending heartbeats and block reports to the NameNode
-///
-/// Handling client requests for block data
+/// Manages block operations such as reading, writing, and replication.
+struct BlockManager {
+    blocks: Vec<Block>,
+}
 
-struct BlockManager {}
-
+/// Manages the sending of heartbeats to the NameNode at regular intervals.
 struct HeartbeatManager {
     datanode_service_client: Arc<Mutex<DataNodeServiceClient<Channel>>>,
     interval: Duration,
@@ -31,6 +28,7 @@ struct HeartbeatManager {
 }
 
 impl HeartbeatManager {
+    /// Constructs a new HeartbeatManager.
     fn new(
         datanode_service_client: Arc<Mutex<DataNodeServiceClient<Channel>>>,
         interval: Duration,
@@ -44,24 +42,25 @@ impl HeartbeatManager {
         }
     }
 
+    /// Starts the heartbeat process, sending heartbeats at regular intervals.
     async fn start(&mut self) {
         self.running = true;
         let client = self.datanode_service_client.clone();
         let interval = self.interval;
-        let request = HeartBeatRequest {
-            datanode_id: self.id.to_string(),
-
-        };
+        let datanode_id_str = self.id.to_string();
 
         tokio::spawn(async move {
             let mut interval_timer = time::interval(interval);
             loop {
                 interval_timer.tick().await;
                 let mut client_guard = client.lock().await;
+                let request = HeartBeatRequest {
+                    datanode_id: datanode_id_str.clone(),
+                };
                 println!("Sending heartbeat.");
-                match client_guard.send_heart_beat(request.clone()).await {
+                match client_guard.send_heart_beat(request).await {
                     Ok(response) => {
-                        println!("{:?}",response);
+                        println!("{:?}", response);
                         response.into_inner();
                     }
                     Err(_e) => {
@@ -73,6 +72,7 @@ impl HeartbeatManager {
     }
 }
 
+/// Represents a DataNode in a distributed file system.
 pub struct DataNode {
     id: Uuid,
     data_dir: String,
@@ -85,41 +85,41 @@ pub struct DataNode {
 }
 
 impl DataNode {
-
+    /// Registers the DataNode with the NameNode and provides health metrics.
     async fn register_with_namenode(
         &self,
         data_node_client: &mut DataNodeServiceClient<Channel>,
     ) -> Result<RegistrationResponse, RSHDFSError> {
         let node_health_metrics = gather_metrics().await?;
         let registration_request = RegistrationRequest {
-            datanode_id: self.id.clone().to_string(),
+            datanode_id: self.id.to_string(),
             addr: self.addr.clone(),
             health_metrics: Some(node_health_metrics),
-
         };
 
-        match data_node_client
-            .register_with_namenode(registration_request.clone())
+        data_node_client
+            .register_with_namenode(registration_request)
             .await
-        {
-            Ok(response) => Ok(response.into_inner()),
-            Err(_e) => Err(RSHDFSError::RegistrationFailed(String::from(
-                "Registration with the NameNode failed.",
-            ))),
-        }
+            .map_err(|_| {
+                RSHDFSError::RegistrationFailed(String::from(
+                    "Registration with the NameNode failed.",
+                ))
+            })
+            .map(|response| response.into_inner())
     }
 
+    /// Creates a new DataNode from the provided configuration.
     pub async fn from_config(config: DataNodeConfig) -> Result<Self, RSHDFSError> {
-        println!("Attempting to establish connection with: {}", config.namenode_address);
+        println!(
+            "Attempting to establish connection with: {}",
+            config.namenode_address
+        );
         let id = Uuid::new_v4();
-        let ipc_address = config.ipc_address.clone();
-        let namenode_addr = config.namenode_address.clone();
-        let endpoint = Endpoint::from_shared(format!("http://{}",config.namenode_address))?;
-        let client= DataNodeServiceClient::connect(endpoint).await?;
+        let endpoint = Endpoint::from_shared(format!("http://{}", config.namenode_address))?;
+        let client = DataNodeServiceClient::connect(endpoint).await?;
         let wrapped_client = Arc::new(Mutex::new(client));
-        let heartbeat_client= wrapped_client.clone();
         let heartbeat_manager = HeartbeatManager::new(
-            heartbeat_client,
+            wrapped_client.clone(),
             Duration::from_millis(config.heartbeat_interval),
             id,
         );
@@ -130,17 +130,18 @@ impl DataNode {
             data_dir: config.data_dir,
             heartbeat_interval: Duration::from_millis(config.heartbeat_interval),
             block_report_interval: Duration::from_millis(config.block_report_interval),
-            addr: ipc_address,
-            namenode_addr,
+            addr: config.ipc_address,
+            namenode_addr: config.namenode_address,
             heartbeat_manager,
         })
     }
 
+    /// Starts the main operations of the DataNode, including registration and heartbeat sending.
     pub async fn start(&mut self) -> Result<(), RSHDFSError> {
         // Step 1: Register with NameNode
         let mut client_guard = self.client.lock().await;
         let registration_response = self.register_with_namenode(&mut client_guard).await?;
-        drop(client_guard);
+        drop(client_guard); // Explicitly drop to release the lock.
         println!("Registered with NameNode: {:?}", registration_response);
         println!("Starting Heartbeat...");
 
@@ -152,12 +153,13 @@ impl DataNode {
     }
 }
 
+/// Gathers health metrics from the system for reporting to the NameNode.
 async fn gather_metrics() -> Result<NodeHealthMetrics, RSHDFSError> {
     let mut system = System::new_all();
     system.refresh_all();
 
     let cpu_load = system.global_cpu_info().cpu_usage() as f64;
-    let memory_usage = system.used_memory() as f64 / system.available_memory() as f64 * 100.0;
+    let memory_usage = system.used_memory() as f64 / system.total_memory() as f64 * 100.0;
 
     Ok(NodeHealthMetrics {
         cpu_load,

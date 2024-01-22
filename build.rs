@@ -7,6 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/client_protocol.proto",
                 "proto/datanode_protocol.proto",
             ],
-            &["proto"])?;
+            &["proto"],
+        )?;
     Ok(())
 }

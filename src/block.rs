@@ -1,36 +1,38 @@
+use prost_types::Timestamp;
+
 use std::hash::{Hash, Hasher};
-use serde::{Serialize, Deserialize};
+use uuid::Uuid;
 
-use crate::proto;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Block {
-    id: u64,
-    size: u32,
-    creation_time: u64,
-    last_modified: u64,
-    last_accessed: u64,
-    state: BlockState,
+    block_metadata: BlockMetadata,
+    data: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BlockMetadata {
+    id: Uuid,
+    generation_timestamp: Timestamp,
+    length: i64,
+    version: i32,
+    checksum: String,
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum BlockState {
-    Default,
-    UnderConstruction,
-    Ready,
-    Corrupted,
+impl PartialEq for BlockMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
 }
 
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.block_metadata.id == other.block_metadata.id
     }
 }
 impl Eq for Block {}
 
 impl Hash for Block {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+        self.block_metadata.id.hash(state);
     }
 }

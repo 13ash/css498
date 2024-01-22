@@ -1,10 +1,9 @@
-use std::net::SocketAddr;
-use std::str::FromStr;
 use chrono::Local;
 use rs_hdfs::config::namenode_config::NameNodeConfig;
 use rs_hdfs::error::Result;
 use rs_hdfs::namenode::namenode::NameNode;
 use rs_hdfs::proto::data_node_service_server::DataNodeServiceServer;
+
 use tonic::transport::Server;
 
 #[tokio::main]
@@ -15,7 +14,6 @@ async fn main() -> Result<()> {
 
     let now = Local::now();
     println!("Time: {}", now.format("%Y-%m-%d %H:%M:%S"));
-
 
     // Server address
     println!("Listening on: {}", addr);
