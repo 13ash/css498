@@ -1,16 +1,18 @@
 use std::str::FromStr;
-use std::sync::RwLock;
-use tonic::{Request, Response, Status};
+use std::sync::{Arc, RwLock};
+use tonic::{ Request, Response, Status};
 use uuid::Uuid;
 
 use crate::config::namenode_config::NameNodeConfig;
 use crate::datanode::block_report::BlockReport;
 use crate::error::RSHDFSError;
+use crate::proto;
 use crate::proto::data_node_service_server::DataNodeService;
 use crate::proto::{
     BlockReportRequest, BlockReportResponse, HeartBeatRequest, HeartBeatResponse,
-    RegistrationRequest, RegistrationResponse,
+    RegistrationRequest, RegistrationResponse, CreateRequest, CreateResponse
 };
+use crate::proto::client_protocol_server::ClientProtocol;
 
 /// Represents the possible states of a DataNode.
 enum DataNodeStatus {
@@ -44,6 +46,7 @@ impl DataNode {
 }
 
 /// Represents the NameNode in the distributed file system.
+
 pub struct NameNode {
     id: Uuid,
     data_dir: String,
@@ -70,7 +73,7 @@ impl NameNode {
 }
 
 #[tonic::async_trait]
-impl DataNodeService for NameNode {
+impl DataNodeService for Arc<NameNode> {
     /// Handles heartbeat received from a DataNode.
     async fn send_heart_beat(
         &self,
@@ -135,3 +138,20 @@ impl DataNodeService for NameNode {
         Ok(Response::new(response))
     }
 }
+
+
+#[tonic::async_trait]
+impl ClientProtocol for Arc<NameNode> {
+    async fn create(&self, request: Request<CreateRequest>) -> Result<Response<CreateResponse>, Status> {
+        let inner_request = request.into_inner();
+        println!("{:?}", inner_request);
+        Ok(Response::new(CreateResponse {
+            status: Option::from(proto::Status {
+                success: true,
+                message: String::from("Created File"),
+            }),
+        }))
+    }
+}
+
+

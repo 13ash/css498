@@ -1,6 +1,11 @@
 version: '3.8'
 
 services:
+  client:
+    image: rshdfs-client
+    hostname: client
+    volumes:
+      - ./config/client.xml:/config/client.xml
   namenode:
     image: rshdfs-namenode
     hostname: namenode  # Set the hostname for the NameNode
