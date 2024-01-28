@@ -12,25 +12,30 @@ syntax = "proto3";
 package rs_hdfs.proto;
 
 
-message Path {
-  string path = 1;
-}
-
 message Status {
   bool success = 1;
   string message = 2;
 }
 
 message CreateRequest {
-  Path path = 1;
+  string path = 1;
 }
 
 message CreateResponse {
   Status status = 1;
 }
 
+message DeleteRequest {
+  string path = 1;
+}
+
+message DeleteResponse {
+  Status status = 1;
+}
+
 service ClientProtocol {
   rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
 }
 
 

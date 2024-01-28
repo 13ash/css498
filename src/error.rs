@@ -1,3 +1,6 @@
+use std::sync::{PoisonError, RwLockWriteGuard};
+use crate::namenode::namenode::INode;
+
 #[derive(Debug, PartialEq)]
 pub enum RSHDFSError {
     ConfigError(String),
@@ -5,10 +8,12 @@ pub enum RSHDFSError {
     TonicError(String),
     ProtoError(String),
     FileSystemError(String),
+    InvalidPathError(String),
     IOError(String),
     InsufficientSpace(String),
     HeartBeatFailed(String),
     RegistrationFailed(String),
+    LockError(String),
 }
 
 impl From<tonic::transport::Error> for RSHDFSError {
@@ -20,6 +25,13 @@ impl From<tonic::transport::Error> for RSHDFSError {
 impl From<toml::de::Error> for RSHDFSError {
     fn from(error: toml::de::Error) -> Self {
         RSHDFSError::ConfigError(error.to_string())
+    }
+}
+
+
+impl From<PoisonError<RwLockWriteGuard<'_, INode>>> for RSHDFSError {
+    fn from(error: PoisonError<RwLockWriteGuard<'_, INode>>) -> RSHDFSError {
+        RSHDFSError::LockError(format!("Lock error: {}", error.to_string()))
     }
 }
 

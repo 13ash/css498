@@ -1,8 +1,9 @@
 use rs_hdfs::error::Result;
 use clap::Parser;
+use tonic::{Response, Status};
 use rs_hdfs::config::client_config::ClientConfig;
 use rs_hdfs::proto::client_protocol_client::ClientProtocolClient;
-use rs_hdfs::proto::{CreateRequest, Path};
+use rs_hdfs::proto::{CreateRequest};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -22,24 +23,28 @@ async fn main() -> Result<()> {
     let mut client = ClientProtocolClient::connect(format!("http://{}", config.namenode_address)).await?;
     match args.operation.as_str() {
         "create" => {
-            let file_path = args.file_path;
-            match file_path {
+            match args.file_path {
                 None => {
-                    println!("File path not provided!")
+                    println!("File path not provided!");
                 }
-                Some(path_string) => {
+                Some(file_path) => {
                     let request = CreateRequest {
-                        path : Option::from(Path {
-                            path: path_string,
-                        })
+                        path: file_path,
                     };
-                    let response = client.create(request).await.unwrap().into_inner();
-                    println!("{:?}", response);
+                    match client.create(request).await {
+                        Ok(response) => {
+                            println!("Create file response: {:?}", response);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to create file: {:?}", e);
+                        }
+                    }
                 }
             }
-
-
         },
+        "delete" => {
+
+        }
         _ => println!("Unsupported Operation")
     }
 
