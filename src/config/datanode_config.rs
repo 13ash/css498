@@ -9,6 +9,9 @@ pub struct DataNodeConfig {
     #[serde(rename = "ipc.address")]
     pub ipc_address: String,
 
+    #[serde(rename = "port")]
+    pub port: String,
+
     #[serde(rename = "namenode.address")]
     pub namenode_address: String,
 

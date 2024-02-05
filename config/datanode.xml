@@ -2,6 +2,7 @@
 <dataNodeConfig>
     <data.dir>/hdfs/data</data.dir>
     <ipc.address>0.0.0.0:50002</ipc.address>
+    <port>50002</port>
     <namenode.address>namenode:50000</namenode.address>
     <heartbeat.interval>3000</heartbeat.interval>
     <block.report.interval>21600000</block.report.interval>

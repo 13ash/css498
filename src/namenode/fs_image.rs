@@ -1,3 +1,1 @@
-pub struct FsImage {
-
-}
+pub struct FsImage {}

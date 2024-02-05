@@ -1,0 +1,31 @@
+
+syntax = "proto3";
+
+package rs_hdfs.proto;
+
+service RSHDFSDataNodeService {
+  rpc ReadBlockData(ReadBlockRequest) returns (ReadBlockResponse) {}
+  rpc WriteBlockData(WriteBlockRequest) returns (WriteBlockResponse) {}
+}
+
+message ReadBlockRequest {
+  string block_id = 1;
+}
+
+message ReadBlockResponse {
+  int32 seq = 1;
+  uint32 checksum = 2;
+  bytes block_data = 3;
+}
+
+message WriteBlockRequest {
+  string block_id = 1;
+  int32 seq = 2;
+  bytes data = 3;
+  uint32 checksum = 4;
+}
+
+message WriteBlockResponse {
+  bool success = 1;
+  string message = 2;
+}

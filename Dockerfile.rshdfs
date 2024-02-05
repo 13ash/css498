@@ -26,13 +26,15 @@ RUN apt-get update \
     && apt-get install -y net-tools \
     && apt-get install -y iputils-ping \
     && apt-get install -y netcat \
+    && apt-get install -y vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled binary from the build stage to the final image
-COPY --from=build /root/rust_hdfs/config/client.xml /config/client.xml
-COPY --from=build /root/rust_hdfs/target/release/rs_hdfs_client /bin/rs_hdfs_client
+COPY --from=build /root/rust_hdfs/config/rshdfs.xml /config/rshdfs.xml
+COPY --from=build /root/rust_hdfs/target/release/rshdfs /bin/rshdfs
 
 # Ensure the binary is executable
-RUN chmod +x /bin/rs_hdfs_client
+RUN chmod +x /bin/rshdfs
+
 CMD ["tail", "-f", "/dev/null"]

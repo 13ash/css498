@@ -2,12 +2,19 @@ version: '3.8'
 
 services:
   client:
-    image: rshdfs-client
-    hostname: client
+    image: rshdfs
+    hostname: rshdfs
     volumes:
-      - ./config/client.xml:/config/client.xml
+      - ./config/rshdfs.xml:/config/rshdfs.xml
+      - client-tmp:/tmp
+  client2:
+    image: rshdfs
+    hostname: rshdfs2
+    volumes:
+      - ./config/rshdfs.xml:/config/rshdfs.xml
+      - client2-tmp:/tmp
   namenode:
-    image: rshdfs-namenode
+    image: namenode
     hostname: namenode  # Set the hostname for the NameNode
     ports:
       - "50000:50000"
@@ -16,7 +23,8 @@ services:
       - namenode-data:/hdfs/namenode
 
   datanode1:
-    image: rshdfs-datanode
+    image: datanode
+    hostname: datanode1
     ports:
       - "50002:50002"
     volumes:
@@ -26,7 +34,8 @@ services:
       - NAMENODE_HOST=namenode
 
   datanode2:
-    image: rshdfs-datanode
+    image: datanode
+    hostname: datanode2
     ports:
       - "50003:50002"
     volumes:
@@ -36,7 +45,8 @@ services:
       - NAMENODE_HOST=namenode
 
   datanode3:
-    image: rshdfs-datanode
+    hostname: datanode3
+    image: datanode
     ports:
       - "50004:50002"
     volumes:
@@ -50,3 +60,5 @@ volumes:
   datanode1-data:
   datanode2-data:
   datanode3-data:
+  client-tmp:
+  client2-tmp:

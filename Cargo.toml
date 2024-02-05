@@ -13,8 +13,8 @@ name = "rs_hdfs_namenode"
 path = "src/bin/namenode.rs"
 
 [[bin]]
-name = "rs_hdfs_client"
-path = "src/bin/client.rs"
+name = "rshdfs"
+path = "src/bin/rshdfs.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -30,8 +30,9 @@ tonic = "0.10.2"
 serde = { version = "1.0.193", features = ["derive"] }
 serde-xml-rs = "0.6.0"
 sysinfo = "0.30.5"
-adler32 = "1.2.0"
+adler = "1.0.2"
 uuid = { version = "1.6.1", features = ["v4", "fast-rng"] }
+futures = "0.3.30"
 
 [build-dependencies]
 tonic-build = "0.10.2"

@@ -1,0 +1,69 @@
+/*
+  client_protocol is an RPC protocol that the hdfs clients uses to communicate with the NameNode
+
+  The client_protocol supports file operations and directory operations
+
+  1. File Operations: open, create, delete, append, rename
+  2. Directory Operations: mkdir, ls, get_metadata, is_directory
+ */
+
+syntax = "proto3";
+import "common.proto";
+
+package rs_hdfs.proto;
+
+
+
+message CreateRequest {
+  string path = 1;
+}
+
+message CreateResponse {
+  bool success = 1;
+}
+
+message ReadRequest {
+  string path = 1;
+}
+
+message ReadResponse {
+  repeated BlockMetadata file_blocks = 1;
+}
+
+message LsRequest {
+  string path = 1;
+}
+
+message LsResponse {
+  repeated string inodes = 1;
+}
+
+message WriteFileRequest {
+  string path = 1;
+  uint64 file_size = 2;
+}
+
+message WriteFileResponse {
+  repeated BlockMetadata blocks = 1;
+}
+
+message ConfirmFileWriteRequest {
+  string path = 1;
+  repeated string block_ids = 2;
+}
+
+
+message ConfirmFileWriteResponse {
+  bool success = 1;
+}
+
+
+service RSHDFSNameNodeService {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Ls(LsRequest) returns (LsResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ConfirmFileWrite(ConfirmFileWriteRequest) returns (ConfirmFileWriteResponse);
+}
+
+

@@ -9,11 +9,8 @@ pub struct NameNodeConfig {
     #[serde(rename = "ipc.address")]
     pub ipc_address: String,
 
-    #[serde(rename = "checkpoint.period")]
-    pub checkpoint_period: u16,
-
-    #[serde(rename = "handler.count")]
-    pub handler_count: u8,
+    #[serde(rename = "replication.factor")]
+    pub replication_factor: i8,
 }
 
 impl NameNodeConfig {

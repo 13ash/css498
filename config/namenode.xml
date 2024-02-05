@@ -2,6 +2,5 @@
 <nameNodeConfig>
     <data.dir>/hdfs/namenode</data.dir>
     <ipc.address>0.0.0.0:50000</ipc.address>
-    <checkpoint.period>3600</checkpoint.period>
-    <handler.count>100</handler.count>
+    <replication.factor>3</replication.factor>
 </nameNodeConfig>

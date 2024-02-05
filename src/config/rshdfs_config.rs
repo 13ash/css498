@@ -1,18 +1,17 @@
 use serde::Deserialize;
-use crate::config::datanode_config::DataNodeConfig;
+
 use crate::error::RSHDFSError;
 
 #[derive(Debug, Deserialize)]
-pub struct ClientConfig {
+pub struct RSHDFSConfig {
     #[serde(rename = "namenode.address")]
     pub namenode_address: String,
 }
 
-
-impl ClientConfig {
+impl RSHDFSConfig {
     pub fn from_xml_file(file_path: &str) -> Result<Self, RSHDFSError> {
-        let xml_str = std::fs::read_to_string(file_path).unwrap();
-        let config: ClientConfig = serde_xml_rs::from_str(&xml_str)?;
+        let xml_str = std::fs::read_to_string(file_path).unwrap(); //todo: unwrap
+        let config: RSHDFSConfig = serde_xml_rs::from_str(&xml_str)?;
         Ok(config)
     }
 }

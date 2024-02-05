@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package rs_hdfs.proto;
+
+message BlockMetadata {
+  string block_id = 1;
+  int32 seq = 2;
+  repeated string datanodes = 3;
+}
+
+message Block {
+  string block_id = 1;
+  bytes data = 2;
+}
+
+enum BlockStatus {
+  WAITING = 0;
+  IN_PROGRESS = 1;
+  WRITTEN = 2;
+}
+
+message DataNodeIdentifier {
+  string address = 1;
+}
+
+

@@ -16,13 +16,15 @@
  */
 
 syntax = "proto3";
+import "common.proto";
 
 package rs_hdfs.proto;
 
-service DataNodeService {
+service DataNodeNameNodeService {
   rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
   rpc RegisterWithNamenode(RegistrationRequest) returns (RegistrationResponse) {}
-  rpc SendBlockReport(BlockReportRequest) returns (BlockReportResponse) {}
+  rpc WriteBlockUpdate(WriteBlockUpdateRequest) returns (WriteBlockUpdateResponse) {}
+
 }
 
 message HeartBeatRequest {
@@ -35,8 +37,9 @@ message HeartBeatResponse {
 
 message RegistrationRequest {
   string datanode_id = 1;
-  string addr = 2;
-  NodeHealthMetrics health_metrics = 3;
+  string ipc_address= 2;
+  string hostname_port = 3;
+  NodeHealthMetrics health_metrics = 4;
 }
 
 message NodeHealthMetrics {
@@ -48,21 +51,14 @@ message RegistrationResponse {
   bool success = 1;
 }
 
-message BlockMetadata {
+message WriteBlockUpdateRequest {
   string block_id = 1;
-  int64 generation_timestamp = 2;
-  int64 length = 3;
-  int32 version = 4;
-  string checksum = 5;
+  BlockStatus status = 2;
 }
 
-
-message BlockReportRequest {
-  string datanode_id = 1;
-  repeated BlockMetadata block_metadata = 2;
-
-}
-
-message BlockReportResponse {
+message WriteBlockUpdateResponse {
   bool success = 1;
 }
+
+
+

@@ -1,21 +1,28 @@
-use prost_types::Timestamp;
-
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
+pub const BLOCK_SIZE: i32 = 128 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockStatus {
+    Waiting = 0,
+    InProgress = 1,
+    Written = 2,
+}
+
 #[derive(Debug, Clone)]
 pub struct Block {
-    block_metadata: BlockMetadata,
-    data: Vec<u8>,
+    pub block_metadata: BlockMetadata,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
 pub struct BlockMetadata {
-    id: Uuid,
-    generation_timestamp: Timestamp,
-    length: i64,
-    version: i32,
-    checksum: String,
+    pub id: Uuid,
+    pub seq: i32,
+    pub status: BlockStatus,
+    pub size: i32,
+    pub datanodes: Vec<String>,
 }
 
 impl PartialEq for BlockMetadata {
@@ -29,6 +36,7 @@ impl PartialEq for Block {
         self.block_metadata.id == other.block_metadata.id
     }
 }
+
 impl Eq for Block {}
 
 impl Hash for Block {

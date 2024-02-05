@@ -1,18 +1,17 @@
-use std::sync::Arc;
 use chrono::Local;
 use rs_hdfs::config::namenode_config::NameNodeConfig;
 use rs_hdfs::error::Result;
 use rs_hdfs::namenode::namenode::NameNode;
-use rs_hdfs::proto::data_node_service_server::DataNodeServiceServer;
-
+use rs_hdfs::proto::data_node_name_node_service_server::DataNodeNameNodeServiceServer;
+use rs_hdfs::proto::rshdfs_name_node_service_server::RshdfsNameNodeServiceServer;
+use std::sync::Arc;
 use tonic::transport::Server;
-use rs_hdfs::proto::client_protocol_server::ClientProtocolServer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let config = NameNodeConfig::from_xml_file("config/namenode.xml")?;
     let name_node = Arc::new(NameNode::from_config(config.clone()).await?);
-    let addr = config.ipc_address.parse().unwrap();
+    let addr = config.ipc_address.parse().unwrap(); //todo: unwrap
 
     let now = Local::now();
     println!("Time: {}", now.format("%Y-%m-%d %H:%M:%S"));
@@ -22,8 +21,8 @@ async fn main() -> Result<()> {
 
     // Start the server
     Server::builder()
-        .add_service(DataNodeServiceServer::new(name_node.clone()))
-        .add_service(ClientProtocolServer::new(name_node.clone()))
+        .add_service(DataNodeNameNodeServiceServer::new(name_node.clone()))
+        .add_service(RshdfsNameNodeServiceServer::new(name_node.clone()))
         .serve(addr)
         .await?;
 
