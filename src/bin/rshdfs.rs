@@ -21,27 +21,23 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Create {
+    Get {
         #[arg(short, long)]
-        file_path: String,
+        fp: String,
     },
-    Read {
+    Put {
         #[arg(short, long)]
-        file_path: String,
-    },
-    Write {
+        fp: String,
         #[arg(short, long)]
-        file_path: String,
-        #[arg(short, long)]
-        local_file_path: String,
+        lfp: String,
     },
     Delete {
         #[arg(short, long)]
-        file_path: String,
+        fp: String,
     },
     Ls {
         #[arg(short, long)]
-        file_path: String,
+        fp: String,
     },
 }
 
@@ -53,24 +49,10 @@ async fn main() -> Result<()> {
         RshdfsNameNodeServiceClient::connect(format!("http://{}", config.namenode_address)).await?;
 
     match &args.command {
-        Commands::Create { file_path } => {
-            let request = CreateRequest {
-                path: file_path.clone(),
-            };
-            let unmatched_response = namenode_client.create(request).await;
-            match unmatched_response {
-                Ok(response) => {
-                    println!("Create file response: {:?}", response);
-                }
-                Err(e) => {
-                    eprintln!("Error: {:?}", e);
-                }
-            }
-        }
 
-        Commands::Read { file_path } => {
+        Commands::Get { fp } => {
             let request = ReadRequest {
-                path: file_path.clone(),
+                path: fp.clone(),
             };
             let unmatched_response = namenode_client.read(request).await;
             match unmatched_response {
@@ -78,7 +60,7 @@ async fn main() -> Result<()> {
                     println!("Read file response: {:?}", response);
                     let data = read_handler(response.into_inner()   ).await?;
 
-                    let file_pathbuf = PathBuf::from(file_path);
+                    let file_pathbuf = PathBuf::from(fp);
                     let file_name = file_pathbuf.as_path().components().last().unwrap().as_os_str().to_str().unwrap();
                     let temp_file_path = format!("/tmp/{}", file_name);
 
@@ -100,9 +82,9 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Ls { file_path } => {
+        Commands::Ls { fp } => {
             let request = LsRequest {
-                path: file_path.clone(),
+                path: fp.clone(),
             };
             let unmatched_response = namenode_client.ls(request).await;
             match unmatched_response {
@@ -115,16 +97,16 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Write {
-            local_file_path,
-            file_path,
+        Commands::Put {
+            fp,
+            lfp,
         } => {
-            let local_file = tokio::fs::File::open(local_file_path)
+            let local_file = tokio::fs::File::open(lfp)
                 .await
                 .map_err(|_| RSHDFSError::FileSystemError("File not found.".to_string()))?;
             let local_file_size = local_file.metadata().await.unwrap().len();
             let request = WriteFileRequest {
-                path: file_path.clone(),
+                path: fp.clone(),
                 file_size: local_file_size,
             };
             let unmatched_response = namenode_client.write_file(request).await;
@@ -136,7 +118,7 @@ async fn main() -> Result<()> {
                     match write_block_handler(local_file, inner_response).await {
                         Ok(written_blocks) => {
                             match namenode_client.confirm_file_write(ConfirmFileWriteRequest {
-                                path: file_path.clone(),
+                                path: fp.clone(),
                                 block_ids: written_blocks,
                             }).await {
                                 Ok(_) => println!("File write confirmed successfully."),
