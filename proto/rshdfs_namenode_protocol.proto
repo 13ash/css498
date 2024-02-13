@@ -13,20 +13,11 @@ import "common.proto";
 package rs_hdfs.proto;
 
 
-
-message CreateRequest {
+message GetRequest {
   string path = 1;
 }
 
-message CreateResponse {
-  bool success = 1;
-}
-
-message ReadRequest {
-  string path = 1;
-}
-
-message ReadResponse {
+message GetResponse {
   repeated BlockMetadata file_blocks = 1;
 }
 
@@ -38,32 +29,31 @@ message LsResponse {
   repeated string inodes = 1;
 }
 
-message WriteFileRequest {
+message PutFileRequest {
   string path = 1;
   uint64 file_size = 2;
 }
 
-message WriteFileResponse {
+message PutFileResponse {
   repeated BlockMetadata blocks = 1;
 }
 
-message ConfirmFileWriteRequest {
+message ConfirmFilePutRequest {
   string path = 1;
   repeated string block_ids = 2;
 }
 
 
-message ConfirmFileWriteResponse {
+message ConfirmFilePutResponse {
   bool success = 1;
 }
 
 
 service RSHDFSNameNodeService {
-  rpc Create(CreateRequest) returns (CreateResponse);
-  rpc Read(ReadRequest) returns (ReadResponse);
+  rpc Get(GetRequest) returns (GetResponse);
   rpc Ls(LsRequest) returns (LsResponse);
-  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
-  rpc ConfirmFileWrite(ConfirmFileWriteRequest) returns (ConfirmFileWriteResponse);
+  rpc PutFile(PutFileRequest) returns (PutFileResponse);
+  rpc ConfirmFilePut(ConfirmFilePutRequest) returns (ConfirmFilePutResponse);
 }
 
 

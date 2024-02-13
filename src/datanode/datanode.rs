@@ -1,25 +1,29 @@
 use std::collections::{HashMap};
+use std::hash::Hasher;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use crate::config::datanode_config::DataNodeConfig;
 use crate::error::RSHDFSError;
 
 use crate::proto::data_node_name_node_service_client::DataNodeNameNodeServiceClient;
 use crate::proto::rshdfs_data_node_service_server::RshdfsDataNodeService;
-use crate::proto::{
-    HeartBeatRequest, NodeHealthMetrics, ReadBlockRequest, ReadBlockResponse, RegistrationRequest,
-    RegistrationResponse, WriteBlockRequest, WriteBlockResponse,
-};
-use std::sync::{Arc, RwLock};
+use crate::proto::{BlockChunk, BlockStreamInfo, GetBlockRequest, HeartBeatRequest, NodeHealthMetrics, RegistrationRequest, RegistrationResponse, TransferStatus};
+use std::sync::{Arc};
 use std::time::Duration;
 use adler::Adler32;
 use sysinfo::System;
-use tokio::sync::Mutex;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{Mutex, mpsc, RwLock};
 use tokio::time;
 use tonic::transport::{Channel, Endpoint};
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
+use tonic::codegen::Body;
+use tonic::codegen::tokio_stream::StreamExt;
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
+use crate::block::BLOCK_CHUNK_SIZE;
+
 
 /// Manages the sending of heartbeats to the NameNode at regular intervals.
 struct HeartbeatManager {
@@ -35,11 +39,10 @@ struct BlockPayload {
     data: Vec<u8>,
 }
 
-#[derive(Clone, Copy)]
 struct BlockInfo {
-    seq: i32,
-    checksum: u32,
+    block_seq: i32,
 }
+
 
 impl HeartbeatManager {
     fn new(
@@ -160,7 +163,7 @@ impl DataNode {
         // Step 1: Register with NameNode
         let mut client_guard = self.client.lock().await;
         let registration_response = self.register_with_namenode(&mut client_guard).await?;
-        drop(client_guard); // Explicitly drop to release the lock.
+        drop(client_guard);
         println!("Registered with NameNode: {:?}", registration_response);
         println!("Starting Heartbeat...");
 
@@ -170,43 +173,16 @@ impl DataNode {
         Ok(())
     }
 
-    async fn read_block(&self, block_id: String) -> Result<BlockPayload, RSHDFSError> {
-        // Parse the UUID first to handle any potential errors
-        let block_uuid = Uuid::from_str(&block_id)
-            .map_err(|_| RSHDFSError::FileSystemError("Invalid Block ID".to_string()))?;
-
-        // Scope to limit the lifetime of the lock guard
-        let block_info = {
-            let block_set_read_guard = self.blocks.read().map_err(|_| RSHDFSError::LockError("Failed to acquire read lock".to_string()))?;
-            match block_set_read_guard.get(&block_uuid) {
-                Some(&block_info) => block_info,
-                None => return Err(RSHDFSError::FileSystemError("Block not found.".to_string())),
-            }
-        }; // Lock is dropped here
-
-        // Now perform the asynchronous file read operation
-        let path = PathBuf::from(format!("{}/{}_{}.dat", self.data_dir, block_id, block_info.seq));
-        match tokio::fs::read(path).await {
-            Ok(data) => Ok(BlockPayload {seq: block_info.seq, checksum: block_info.checksum, data}),
-            Err(_) => Err(RSHDFSError::FileSystemError("Error reading block data.".to_string())),
-        }
-    }
-
-
-    async fn write_block(&self, block_id: String, seq: i32, data: Vec<u8>, data_checksum: u32) -> Result<(), RSHDFSError> {
-        let path = PathBuf::from(format!("{}/{}_{}.dat", self.data_dir, block_id, seq));
-        match tokio::fs::write(path, data).await {
-            Ok(_) => {
-                let mut block_set_write_guard = self.blocks.write().map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
-                block_set_write_guard.insert(Uuid::from_str(block_id.as_str()).unwrap(), BlockInfo {
-                    seq,
-                    checksum: data_checksum
+    async fn get_block_info(&self, uuid: Uuid) -> Result<BlockInfo, RSHDFSError> {
+        let block_read_guard = self.blocks.read().await;
+        let maybe_block_info = block_read_guard.get(&uuid);
+        match maybe_block_info {
+            None => Err(RSHDFSError::ReadError(String::from("Block not found."))),
+            Some(block_info) => {
+                return Ok(BlockInfo {
+                    block_seq: block_info.block_seq,
                 });
-                Ok(())
-            },
-            Err(_) => Err(RSHDFSError::FileSystemError(
-                "Error reading block data.".to_string(),
-            )),
+            }
         }
     }
 }
@@ -227,53 +203,131 @@ async fn gather_metrics() -> Result<NodeHealthMetrics, RSHDFSError> {
 
 #[tonic::async_trait]
 impl RshdfsDataNodeService for DataNode {
-    async fn read_block_data(
-        &self,
-        request: Request<ReadBlockRequest>,
-    ) -> Result<Response<ReadBlockResponse>, Status> {
-        let inner_request = request.into_inner();
-        match self
-            .read_block(inner_request.block_id)
-            .await
-        {
-            Ok(block_data) => Ok(Response::new(ReadBlockResponse { seq: block_data.seq, block_data: block_data.data, checksum: block_data.checksum })),
-            Err(e) => return Err(Status::from(e)),
+    async fn put_block_streamed(&self, request: Request<Streaming<BlockChunk>>) -> Result<Response<TransferStatus>, Status> {
+        let mut stream = request.into_inner();
+
+        // Grab the first block off the stream
+        let first_chunk = match stream.next().await {
+            Some(Ok(chunk)) => chunk,
+            Some(Err(e)) => return Err(Status::aborted(format!("Failed to read chunk: {}", e))),
+            None => return Err(Status::invalid_argument("No chunks received")),
+        };
+
+        // Create a file based on the first block's information
+        let file_path = format!("{}/{}_{}.dat", self.data_dir, first_chunk.block_id, first_chunk.block_seq);
+        let mut file = match File::create(&file_path).await {
+            Ok(file) => file,
+            Err(e) => return Err(Status::internal(format!("Failed to create file: {}", e))),
+        };
+
+        // Write the first chunk's data to the file
+        if let Err(e) = file.write_all(&first_chunk.chunked_data).await {
+            return Err(Status::internal(format!("Failed to write to file: {}", e)));
         }
+
+        // Loop to process remaining chunks
+        let mut seq = 1;
+        let mut total_chunks_received = BLOCK_CHUNK_SIZE;
+        while let Some(chunk_result) = stream.next().await {
+            let block_chunk = match chunk_result {
+                Ok(chunk) => chunk,
+                Err(e) => return Err(Status::aborted(format!("Failed to read chunk: {}", e))),
+            };
+
+            println!("received chunk: block_id={}, seq={}, checksum ={}", block_chunk.block_id, block_chunk.block_seq, block_chunk.checksum);
+            // Validate the block_chunk (e.g., checksum validation here)
+            let mut adler = Adler32::new();
+            adler.write_slice(&block_chunk.chunked_data);
+            let checksum = adler.checksum();
+
+            if block_chunk.checksum == checksum && seq == block_chunk.chunk_seq {
+
+                // Write the chunk's data to the file
+                if let Err(e) = file.write_all(&block_chunk.chunked_data).await {
+                    return Err(Status::internal(format!("Failed to write to file: {}", e)));
+                }
+                total_chunks_received += block_chunk.chunked_data.len();
+                seq += 1;
+            }
+        }
+        println!("Total chunks: {}", total_chunks_received);
+
+        // Return transfer status
+        Ok(Response::new(TransferStatus {
+            success: true,
+            message: String::from("All chunks processed successfully"),
+        }))
     }
 
-    async fn write_block_data(
+    type GetBlockStreamedStream = ReceiverStream<Result<BlockChunk, Status>>;
+
+    async fn get_block_streamed(
         &self,
-        request: Request<WriteBlockRequest>,
-    ) -> Result<Response<WriteBlockResponse>, Status> {
+        request: Request<GetBlockRequest>,
+    ) -> Result<Response<Self::GetBlockStreamedStream>, Status> {
         let inner_request = request.into_inner();
-        let request_checksum = inner_request.checksum;
-        let request_block = inner_request.data.clone();
+        let block_id = inner_request.block_id;
+        let block_id_uuid = Uuid::parse_str(&block_id)
+            .map_err(|_| Status::invalid_argument("Invalid UUID format."))?;
 
-        let mut request_block_adler = Adler32::new();
-        request_block_adler.write_slice(&request_block);
-        let calculated_checksum = request_block_adler.checksum();
+        let block_info = self.get_block_info(block_id_uuid).await?;
+        let block_info_seq = block_info.block_seq;
+        let file_path = PathBuf::from(format!("{}/{}_{}.dat", self.data_dir, block_id, block_info_seq));
+        let mut file = File::open(&file_path).await
+            .map_err(|_| Status::internal("Failed to open file"))?;
 
-        if request_checksum == calculated_checksum {
-            // Proceed with writing the block
-            match self
-                .write_block(
-                    inner_request.block_id,
-                    inner_request.seq,
-                    request_block,
-                    calculated_checksum
-                )
-                .await
-            {
-                Ok(_) => Ok(Response::new(WriteBlockResponse {
-                    success: true,
-                    message: "Block Written to DataNode".to_string(),
-                })),
-                Err(e) => Err(Status::from(e)),
+        let (sender, receiver) = mpsc::channel(15);
+
+        tokio::spawn(async move {
+            let mut seq = 0;
+            loop {
+                let mut chunk_sized_buffer = vec![0; BLOCK_CHUNK_SIZE];
+                let n = match file.read(&mut chunk_sized_buffer).await {
+                    Ok(n) if n == 0 => break, // End of file
+                    Ok(n) => n,
+                    Err(_) => {
+                        eprintln!("Error reading file chunk");
+                        break;
+                    }
+                };
+
+                chunk_sized_buffer.truncate(n); // Adjust buffer size to actual data read
+
+                let mut adler = Adler32::new();
+                adler.write_slice(&chunk_sized_buffer);
+                let checksum = adler.checksum();
+                let block_chunk = BlockChunk {
+                    block_id: block_id.clone(),
+                    block_seq: block_info_seq,
+                    chunked_data: chunk_sized_buffer,
+                    chunk_seq: seq,
+                    checksum,
+                };
+
+                if sender.send(Ok(block_chunk)).await.is_err() {
+                    eprintln!("Receiver dropped, stopping stream.");
+                    break;
+                }
+
+                seq += 1; // Increment the sequence for the next chunk
             }
-        } else {
-            // Checksum mismatch
-            Err(Status::internal("Checksum Mismatch"))
-        }
+        });
+
+        Ok(Response::new(ReceiverStream::new(receiver)))
+    }
+
+    async fn start_block_stream(&self, request: Request<BlockStreamInfo>) -> Result<Response<TransferStatus>, Status> {
+        let block_stream_info = request.into_inner();
+        let block_info = BlockInfo {
+            block_seq: block_stream_info.block_seq,
+        };
+        let block_uuid = Uuid::parse_str(&block_stream_info.block_id).map_err(|_| RSHDFSError::UUIDError(String::from("Bad UUID string.")))?;
+        let mut blocks_guard = self.blocks.write().await;
+
+        blocks_guard.insert(block_uuid, block_info);
+        Ok(Response::new(TransferStatus {
+            success: true,
+            message: "Block information updated.".to_string(),
+        }))
     }
 }
-

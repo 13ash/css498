@@ -1,16 +1,16 @@
-use std::io::Write;
+
 use std::path::PathBuf;
 use clap::{Parser, Subcommand};
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
-use rs_hdfs::error::{RSHDFSError, Result};
+
+
+
+use rs_hdfs::error::{Result, RSHDFSError};
 
 use rs_hdfs::config::rshdfs_config::RSHDFSConfig;
 use rs_hdfs::proto::rshdfs_name_node_service_client::RshdfsNameNodeServiceClient;
-use rs_hdfs::proto::{ConfirmFileWriteRequest, CreateRequest, LsRequest, ReadRequest, WriteFileRequest};
-use rs_hdfs::rshdfs::handler::{read_handler, write_block_handler};
+use rs_hdfs::proto::{LsRequest, GetRequest, PutFileRequest, ConfirmFilePutRequest};
+use rs_hdfs::rshdfs::handler::{get_handler, put_handler};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -51,35 +51,28 @@ async fn main() -> Result<()> {
     match &args.command {
 
         Commands::Get { fp } => {
-            let request = ReadRequest {
+            let request = GetRequest {
                 path: fp.clone(),
             };
-            let unmatched_response = namenode_client.read(request).await;
+            let unmatched_response = namenode_client.get(request).await;
             match unmatched_response {
                 Ok(response) => {
                     println!("Read file response: {:?}", response);
-                    let data = read_handler(response.into_inner()   ).await?;
-
                     let file_pathbuf = PathBuf::from(fp);
-                    let file_name = file_pathbuf.as_path().components().last().unwrap().as_os_str().to_str().unwrap();
-                    let temp_file_path = format!("/tmp/{}", file_name);
 
-
-
-                    let mut temp_file = File::create(format!("/tmp/{}", file_name)).await.unwrap();
-                    temp_file.write_all(&data).await?;
-
-                    Command::new("vim")
-                        .arg(temp_file_path)
-                        .status()
-                        .await
-                        .expect("Failed to open editor");
-
+                    if let Some(file_name) = file_pathbuf.file_name() {
+                        let file_name_str = file_name.to_string_lossy();
+                        let new_path = PathBuf::from(format!("/tmp/{}", file_name_str));
+                        get_handler(new_path, response.into_inner()).await?;
+                    } else {
+                        eprintln!("Error: The file path does not have a file name component.");
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error: {:?}", e);
                 }
             }
+
         }
 
         Commands::Ls { fp } => {
@@ -105,19 +98,19 @@ async fn main() -> Result<()> {
                 .await
                 .map_err(|_| RSHDFSError::FileSystemError("File not found.".to_string()))?;
             let local_file_size = local_file.metadata().await.unwrap().len();
-            let request = WriteFileRequest {
+            let request = PutFileRequest {
                 path: fp.clone(),
                 file_size: local_file_size,
             };
-            let unmatched_response = namenode_client.write_file(request).await;
+            let unmatched_response = namenode_client.put_file(request).await;
             match unmatched_response {
                 Ok(response) => {
                     let inner_response = response.into_inner().clone();
                     println!("{:?}", inner_response.blocks);
 
-                    match write_block_handler(local_file, inner_response).await {
+                    match put_handler(local_file, inner_response).await {
                         Ok(written_blocks) => {
-                            match namenode_client.confirm_file_write(ConfirmFileWriteRequest {
+                            match namenode_client.confirm_file_put(ConfirmFilePutRequest {
                                 path: fp.clone(),
                                 block_ids: written_blocks,
                             }).await {
@@ -126,7 +119,7 @@ async fn main() -> Result<()> {
                             }
                         }
                         Err(e) => eprintln!("Error writing blocks: {:?}", e),
-                    };
+                        }
                 }
                 Err(e) => {
                     eprintln!("Error: {:?}", e);

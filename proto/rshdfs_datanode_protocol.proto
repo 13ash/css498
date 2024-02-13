@@ -4,28 +4,40 @@ syntax = "proto3";
 package rs_hdfs.proto;
 
 service RSHDFSDataNodeService {
-  rpc ReadBlockData(ReadBlockRequest) returns (ReadBlockResponse) {}
-  rpc WriteBlockData(WriteBlockRequest) returns (WriteBlockResponse) {}
+  rpc PutBlockStreamed( stream BlockChunk) returns (TransferStatus) {}
+  rpc GetBlockStreamed(GetBlockRequest) returns (stream BlockChunk) {}
+  rpc StartBlockStream(BlockStreamInfo) returns (TransferStatus) {}
 }
 
-message ReadBlockRequest {
+message TransferStatus {
+  bool success = 1;
+  string message = 2;
+}
+
+message BlockStreamInfo {
+  string block_id = 1;
+  int32 block_seq = 2;
+}
+
+message GetBlockRequest {
   string block_id = 1;
 }
 
-message ReadBlockResponse {
+message GetBlockResponse {
   int32 seq = 1;
   uint32 checksum = 2;
   bytes block_data = 3;
 }
 
-message WriteBlockRequest {
-  string block_id = 1;
-  int32 seq = 2;
-  bytes data = 3;
-  uint32 checksum = 4;
-}
-
-message WriteBlockResponse {
+message PutBlockResponse {
   bool success = 1;
   string message = 2;
+}
+
+message BlockChunk {
+  string block_id = 1;
+  int32 block_seq = 2;
+  int32  chunk_seq = 3;
+  bytes chunked_data = 4;
+  uint32 checksum = 5;
 }

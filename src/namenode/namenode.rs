@@ -1,3 +1,8 @@
+
+
+
+
+
 use std::collections::HashMap;
 
 use std::path::{Component, Path, PathBuf};
@@ -7,7 +12,7 @@ use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 
 use tonic::codegen::Body;
-use tonic::{Request, Response, Status};
+use tonic::{async_trait, Request, Response, Status};
 use uuid::Uuid;
 
 use crate::config::namenode_config::NameNodeConfig;
@@ -17,12 +22,12 @@ use crate::namenode::block_map::BlockMap;
 
 use crate::proto::data_node_name_node_service_server::DataNodeNameNodeService;
 use crate::proto::rshdfs_name_node_service_server::RshdfsNameNodeService;
-use crate::proto::{
-    BlockMetadata as ProtoBlockMetadata, ConfirmFileWriteRequest, ConfirmFileWriteResponse,
-    CreateRequest, CreateResponse, HeartBeatRequest, HeartBeatResponse, LsRequest, LsResponse,
-    ReadRequest, ReadResponse, RegistrationRequest, RegistrationResponse, WriteBlockUpdateRequest,
-    WriteBlockUpdateResponse, WriteFileRequest, WriteFileResponse,
-};
+use crate::proto::{BlockMetadata as ProtoBlockMetadata, ConfirmFilePutRequest, ConfirmFilePutResponse, GetRequest, GetResponse, HeartBeatRequest, HeartBeatResponse, LsRequest, LsResponse, PutFileRequest, PutFileResponse, RegistrationRequest, RegistrationResponse, WriteBlockUpdateRequest, WriteBlockUpdateResponse };
+
+
+#[cfg(test)]
+use mockall::{automock, predicate::*};
+
 #[derive(Debug, Clone)]
 pub enum INode {
     Directory {
@@ -88,6 +93,24 @@ impl DataNode {
 
 /// Represents the NameNode in the distributed file system.
 
+#[cfg_attr(test, automock)]
+#[async_trait]
+trait NamespaceManager {
+    async fn add_inode_to_namespace(&self, path: PathBuf, inode: INode) -> Result<(), RSHDFSError>;
+    async fn ls_inodes(&self, path: PathBuf) -> Result<Vec<String>, RSHDFSError>;
+    async fn add_block_to_file(&self, path_buf: PathBuf, block_metadata: BlockMetadata) -> Result<Vec<Uuid>, RSHDFSError>;
+
+    async fn get_file_blocks(&self, path: PathBuf) -> Result<Vec<BlockMetadata>, RSHDFSError>;
+
+}
+
+#[cfg_attr(test, automock)]
+#[async_trait]
+trait DatanodeManager {
+    async fn select_datanodes(&self) -> Result<Vec<String>, RSHDFSError>;
+}
+
+
 pub struct NameNode {
     id: Uuid,
     data_dir: String,
@@ -116,6 +139,107 @@ impl NameNode {
             block_map: BlockMap::new(),
             replication_factor: config.replication_factor,
         })
+    }
+
+    fn traverse_to_inode<'a>(
+        current_node: &'a mut INode,
+        path: &Path,
+    ) -> Result<&'a mut INode, RSHDFSError> {
+        let mut node = current_node;
+
+        for component in path.components() {
+            match component {
+                Component::Normal(name) => {
+                    let name_str = name
+                        .to_str()
+                        .ok_or_else(|| {
+                            RSHDFSError::PathError(format!("Invalid path component: {:?}", name))
+                        })?
+                        .to_string();
+
+                    // Traverse to the next component in the path
+                    match node {
+                        INode::Directory { children, .. } => {
+                            node = children.get_mut(&name_str).ok_or_else(|| {
+                                RSHDFSError::PathError(format!("Path not found: {:?}", name_str))
+                            })?;
+                        }
+                        INode::File { .. } => {
+                            // If a file is encountered in the middle of the path, return an error
+                            return Err(RSHDFSError::PathError(
+                                "Encountered file in path to directory".to_string(),
+                            ));
+                        }
+                    }
+                }
+                _ => return Err(RSHDFSError::PathError("Invalid path".to_string())),
+            }
+        }
+        Ok(node)
+    }
+}
+
+#[async_trait]
+impl NamespaceManager for NameNode {
+    async fn add_inode_to_namespace(&self, path: PathBuf, inode: INode) -> Result<(), RSHDFSError> {
+        let mut namespace_guard = self
+            .namespace
+            .write()
+            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
+
+        if path.components().count() == 0 {
+            return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
+        }
+
+        let mut current_node = &mut *namespace_guard;
+
+        // Iterate over the path components, except for the last one (the name of the new inode)
+        for component in path.iter().take(path.components().count() - 1) {
+            let component_str = component.to_str().ok_or_else(|| {
+                RSHDFSError::InvalidPathError("Invalid path component".to_string())
+            })?;
+
+            current_node = match current_node {
+                INode::Directory { children, .. } => {
+                    // Get or create a new directory for the current component
+                    children
+                        .entry(component_str.to_string())
+                        .or_insert_with(|| INode::new_directory(PathBuf::from(component)))
+                }
+                _ => {
+                    return Err(RSHDFSError::FileSystemError(format!(
+                        "'{}' is not a directory",
+                        component_str
+                    )))
+                }
+            };
+        }
+
+        // Extract the final part of the path (the name of the new inode)
+        let final_part = path
+            .file_name()
+            .ok_or_else(|| {
+                RSHDFSError::InvalidPathError("Invalid final path component".to_string())
+            })?
+            .to_str()
+            .unwrap();
+
+        match current_node {
+            INode::Directory { children, .. } => {
+                if children.contains_key(final_part) {
+                    Err(RSHDFSError::FileSystemError(
+                        "File or directory already exists".to_string(),
+                    ))
+                } else {
+                    // Insert the new inode into the parent directory's children
+                    children.insert(final_part.to_string(), inode);
+                    Ok(())
+                }
+            }
+            _ => Err(RSHDFSError::FileSystemError(
+                "Parent path is not a directory".to_string(),
+            )),
+        }
     }
 
     async fn ls_inodes(&self, path: PathBuf) -> Result<Vec<String>, RSHDFSError> {
@@ -233,67 +357,11 @@ impl NameNode {
             ))
         }
     }
+}
 
-    async fn add_inode_to_namespace(&self, path: PathBuf, inode: INode) -> Result<(), RSHDFSError> {
-        let mut namespace_guard = self
-            .namespace
-            .write()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
 
-        if path.components().count() == 0 {
-            return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
-        }
-
-        let mut current_node = &mut *namespace_guard;
-
-        // Iterate over the path components, except for the last one (the name of the new inode)
-        for component in path.iter().take(path.components().count() - 1) {
-            let component_str = component.to_str().ok_or_else(|| {
-                RSHDFSError::InvalidPathError("Invalid path component".to_string())
-            })?;
-
-            current_node = match current_node {
-                INode::Directory { children, .. } => {
-                    // Get or create a new directory for the current component
-                    children
-                        .entry(component_str.to_string())
-                        .or_insert_with(|| INode::new_directory(PathBuf::from(component)))
-                }
-                _ => {
-                    return Err(RSHDFSError::FileSystemError(format!(
-                        "'{}' is not a directory",
-                        component_str
-                    )))
-                }
-            };
-        }
-
-        // Extract the final part of the path (the name of the new inode)
-        let final_part = path
-            .file_name()
-            .ok_or_else(|| {
-                RSHDFSError::InvalidPathError("Invalid final path component".to_string())
-            })?
-            .to_str()
-            .unwrap();
-
-        match current_node {
-            INode::Directory { children, .. } => {
-                if children.contains_key(final_part) {
-                    Err(RSHDFSError::FileSystemError(
-                        "File or directory already exists".to_string(),
-                    ))
-                } else {
-                    // Insert the new inode into the parent directory's children
-                    children.insert(final_part.to_string(), inode);
-                    Ok(())
-                }
-            }
-            _ => Err(RSHDFSError::FileSystemError(
-                "Parent path is not a directory".to_string(),
-            )),
-        }
-    }
+#[async_trait]
+impl DatanodeManager for NameNode {
 
     async fn select_datanodes(&self) -> Result<Vec<String>, RSHDFSError> {
         let datanodes_read_guard = self
@@ -317,43 +385,6 @@ impl NameNode {
             ));
         }
         Ok(selected_datanodes)
-    }
-
-    fn traverse_to_inode<'a>(
-        current_node: &'a mut INode,
-        path: &Path,
-    ) -> Result<&'a mut INode, RSHDFSError> {
-        let mut node = current_node;
-
-        for component in path.components() {
-            match component {
-                Component::Normal(name) => {
-                    let name_str = name
-                        .to_str()
-                        .ok_or_else(|| {
-                            RSHDFSError::PathError(format!("Invalid path component: {:?}", name))
-                        })?
-                        .to_string();
-
-                    // Traverse to the next component in the path
-                    match node {
-                        INode::Directory { children, .. } => {
-                            node = children.get_mut(&name_str).ok_or_else(|| {
-                                RSHDFSError::PathError(format!("Path not found: {:?}", name_str))
-                            })?;
-                        }
-                        INode::File { .. } => {
-                            // If a file is encountered in the middle of the path, return an error
-                            return Err(RSHDFSError::PathError(
-                                "Encountered file in path to directory".to_string(),
-                            ));
-                        }
-                    }
-                }
-                _ => return Err(RSHDFSError::PathError("Invalid path".to_string())),
-            }
-        }
-        Ok(node)
     }
 }
 
@@ -438,26 +469,8 @@ impl DataNodeNameNodeService for Arc<NameNode> {
 
 #[tonic::async_trait]
 impl RshdfsNameNodeService for Arc<NameNode> {
-    async fn create(
-        &self,
-        request: Request<CreateRequest>,
-    ) -> Result<Response<CreateResponse>, Status> {
-        let inner_request = request.into_inner();
 
-        let new_file = INode::File {
-            path: PathBuf::from(inner_request.path.clone()),
-            block_ids: Vec::new(),
-        };
-        let result = self
-            .add_inode_to_namespace(PathBuf::from(inner_request.path), new_file)
-            .await;
-        match result {
-            Ok(_) => Ok(Response::new(CreateResponse { success: true })),
-            Err(e) => Err(Status::from(e)),
-        }
-    }
-
-    async fn read(&self, request: Request<ReadRequest>) -> Result<Response<ReadResponse>, Status> {
+    async fn get(&self, request: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let inner_request = request.into_inner();
         match self
             .get_file_blocks(PathBuf::from(inner_request.path))
@@ -472,7 +485,7 @@ impl RshdfsNameNodeService for Arc<NameNode> {
                         datanodes: block.clone().datanodes,
                     })
                 });
-                Ok(Response::new(ReadResponse {
+                Ok(Response::new(GetResponse {
                     file_blocks: proto_blocks,
                 }))
             }
@@ -488,10 +501,10 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         }
     }
 
-    async fn write_file(
+    async fn put_file(
         &self,
-        request: Request<WriteFileRequest>,
-    ) -> Result<Response<WriteFileResponse>, Status> {
+        request: Request<PutFileRequest>,
+    ) -> Result<Response<PutFileResponse>, Status> {
         let inner_request = request.into_inner();
         let file_size = inner_request.file_size;
         let num_blocks = (file_size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
@@ -520,15 +533,15 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         }
 
         // Send block information to client
-        Ok(Response::new(WriteFileResponse {
+        Ok(Response::new(PutFileResponse {
             blocks: block_info, // Send this information to the client
         }))
     }
 
-    async fn confirm_file_write(
+    async fn confirm_file_put(
         &self,
-        request: Request<ConfirmFileWriteRequest>,
-    ) -> Result<Response<ConfirmFileWriteResponse>, Status> {
+        request: Request<ConfirmFilePutRequest>,
+    ) -> Result<Response<ConfirmFilePutResponse>, Status> {
         let mut uuid_vec = vec![];
         let inner_request = request.into_inner().clone();
         inner_request
@@ -543,8 +556,76 @@ impl RshdfsNameNodeService for Arc<NameNode> {
             .add_inode_to_namespace(PathBuf::from(inner_request.path.clone()), new_file)
             .await
         {
-            Ok(_) => Ok(Response::new(ConfirmFileWriteResponse { success: true })),
+            Ok(_) => Ok(Response::new(ConfirmFilePutResponse { success: true })),
             Err(e) => Err(Status::from(e)),
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use crate::error::RSHDFSError;
+    use crate::namenode::namenode::{INode, MockNamespaceManager, NamespaceManager};
+
+    #[tokio::test]
+    async fn add_inode_to_namespace_expects_invalid_path_empty() {
+        let test_path = PathBuf::from("");
+        let test_inode = INode::File {
+            path: test_path.clone(),
+            block_ids: vec![]
+        };
+        let mut mock_namespace_manager = MockNamespaceManager::new();
+        mock_namespace_manager.expect_add_inode_to_namespace().times(1).returning(|_path, _inode| Err(RSHDFSError::InvalidPathError("Empty Path".to_string())));
+        let result = mock_namespace_manager.add_inode_to_namespace(test_path, test_inode).await;
+
+        assert_eq!(result, Err(RSHDFSError::InvalidPathError("Empty Path".to_string())));
+    }
+
+    #[tokio::test]
+    async fn add_inode_to_namespace_expects_invalid_path_component() {
+        let test_path = PathBuf::from("/valid/path/to/\u{FFFF}/inode");
+        let test_inode = INode::File {
+            path: test_path.clone(),
+            block_ids: vec![]
+        };
+        let mut mock_namespace_manager = MockNamespaceManager::new();
+        mock_namespace_manager.expect_add_inode_to_namespace().times(1).returning(|_path, _inode| Err(RSHDFSError::InvalidPathError("Invalid path component".to_string())));
+        let result = mock_namespace_manager.add_inode_to_namespace(test_path, test_inode).await;
+
+        assert_eq!(result, Err(RSHDFSError::InvalidPathError("Invalid path component".to_string())));
+    }
+
+    #[tokio::test]
+    async fn add_inode_to_namespace_expects_is_not_a_directory() {
+        let test_path = PathBuf::from("/a");
+        let test_path_clone = test_path.clone();
+        let _test_path_string = String::from("/a");
+
+        let mut children = HashMap::new();
+        children.insert("some".to_string(),
+        INode::File {
+            path: test_path,
+            block_ids: vec![],
+        });
+
+        let test_inode = INode::Directory {
+            path: PathBuf::from("/"),
+            children,
+        };
+        let mut mock_namespace_manager = MockNamespaceManager::new();
+        mock_namespace_manager.expect_add_inode_to_namespace().times(1).returning(|path, _inode| Err(RSHDFSError::FileSystemError(format!(
+            "'{}' is not a directory",
+            path.to_str().unwrap()))));
+        let result = mock_namespace_manager.add_inode_to_namespace(test_path_clone, test_inode).await;
+
+        assert_eq!(result, Err(RSHDFSError::FileSystemError(String::from("/a is not a directory"))));
+    }
+}
+
+
+
+
+

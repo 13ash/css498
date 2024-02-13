@@ -1,7 +1,8 @@
 use std::hash::{Hash, Hasher};
 use uuid::Uuid;
 
-pub const BLOCK_SIZE: i32 = 128 * 1024 * 1024;
+pub const BLOCK_SIZE: usize = 128 * 1024 * 1024; // 128MB
+pub const BLOCK_CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockStatus {
@@ -21,7 +22,7 @@ pub struct BlockMetadata {
     pub id: Uuid,
     pub seq: i32,
     pub status: BlockStatus,
-    pub size: i32,
+    pub size: usize,
     pub datanodes: Vec<String>,
 }
 
