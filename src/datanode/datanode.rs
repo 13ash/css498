@@ -227,14 +227,12 @@ impl RshdfsDataNodeService for DataNode {
 
         // Loop to process remaining chunks
         let mut seq = 1;
-        let mut total_chunks_received = BLOCK_CHUNK_SIZE;
         while let Some(chunk_result) = stream.next().await {
             let block_chunk = match chunk_result {
                 Ok(chunk) => chunk,
                 Err(e) => return Err(Status::aborted(format!("Failed to read chunk: {}", e))),
             };
 
-            println!("received chunk: block_id={}, seq={}, checksum ={}", block_chunk.block_id, block_chunk.block_seq, block_chunk.checksum);
             // Validate the block_chunk (e.g., checksum validation here)
             let mut adler = Adler32::new();
             adler.write_slice(&block_chunk.chunked_data);
@@ -246,11 +244,9 @@ impl RshdfsDataNodeService for DataNode {
                 if let Err(e) = file.write_all(&block_chunk.chunked_data).await {
                     return Err(Status::internal(format!("Failed to write to file: {}", e)));
                 }
-                total_chunks_received += block_chunk.chunked_data.len();
                 seq += 1;
             }
         }
-        println!("Total chunks: {}", total_chunks_received);
 
         // Return transfer status
         Ok(Response::new(TransferStatus {

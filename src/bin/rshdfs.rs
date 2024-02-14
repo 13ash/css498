@@ -1,15 +1,11 @@
-
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
-
-
-
-use rs_hdfs::error::{Result, RSHDFSError};
+use rs_hdfs::error::{RSHDFSError, Result};
 
 use rs_hdfs::config::rshdfs_config::RSHDFSConfig;
 use rs_hdfs::proto::rshdfs_name_node_service_client::RshdfsNameNodeServiceClient;
-use rs_hdfs::proto::{LsRequest, GetRequest, PutFileRequest, ConfirmFilePutRequest};
+use rs_hdfs::proto::{ConfirmFilePutRequest, GetRequest, LsRequest, PutFileRequest};
 use rs_hdfs::rshdfs::handler::{get_handler, put_handler};
 
 #[derive(Parser, Debug)]
@@ -49,15 +45,11 @@ async fn main() -> Result<()> {
         RshdfsNameNodeServiceClient::connect(format!("http://{}", config.namenode_address)).await?;
 
     match &args.command {
-
         Commands::Get { fp } => {
-            let request = GetRequest {
-                path: fp.clone(),
-            };
+            let request = GetRequest { path: fp.clone() };
             let unmatched_response = namenode_client.get(request).await;
             match unmatched_response {
                 Ok(response) => {
-                    println!("Read file response: {:?}", response);
                     let file_pathbuf = PathBuf::from(fp);
 
                     if let Some(file_name) = file_pathbuf.file_name() {
@@ -72,13 +64,10 @@ async fn main() -> Result<()> {
                     eprintln!("Error: {:?}", e);
                 }
             }
-
         }
 
         Commands::Ls { fp } => {
-            let request = LsRequest {
-                path: fp.clone(),
-            };
+            let request = LsRequest { path: fp.clone() };
             let unmatched_response = namenode_client.ls(request).await;
             match unmatched_response {
                 Ok(response) => {
@@ -90,10 +79,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Put {
-            fp,
-            lfp,
-        } => {
+        Commands::Put { fp, lfp } => {
             let local_file = tokio::fs::File::open(lfp)
                 .await
                 .map_err(|_| RSHDFSError::FileSystemError("File not found.".to_string()))?;
@@ -106,20 +92,22 @@ async fn main() -> Result<()> {
             match unmatched_response {
                 Ok(response) => {
                     let inner_response = response.into_inner().clone();
-                    println!("{:?}", inner_response.blocks);
 
                     match put_handler(local_file, inner_response).await {
                         Ok(written_blocks) => {
-                            match namenode_client.confirm_file_put(ConfirmFilePutRequest {
-                                path: fp.clone(),
-                                block_ids: written_blocks,
-                            }).await {
+                            match namenode_client
+                                .confirm_file_put(ConfirmFilePutRequest {
+                                    path: fp.clone(),
+                                    block_ids: written_blocks,
+                                })
+                                .await
+                            {
                                 Ok(_) => println!("File write confirmed successfully."),
                                 Err(e) => eprintln!("Error confirming file write: {:?}", e),
                             }
                         }
                         Err(e) => eprintln!("Error writing blocks: {:?}", e),
-                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("Error: {:?}", e);

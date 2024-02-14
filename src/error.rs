@@ -24,7 +24,7 @@ pub enum RSHDFSError {
     DataValidationError(String),
     GrpcError(String),
     StreamError(String),
-    UUIDError(String)
+    UUIDError(String),
 }
 
 impl From<tonic::transport::Error> for RSHDFSError {

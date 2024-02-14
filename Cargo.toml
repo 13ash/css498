@@ -34,7 +34,6 @@ sysinfo = "0.30.5"
 adler = "1.0.2"
 uuid = { version = "1.6.1", features = ["v4", "fast-rng"] }
 futures = "0.3.30"
-tempfile = "3.10.0"
 tokio-stream = "0.1.14"
 
 [build-dependencies]

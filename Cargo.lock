@@ -1129,7 +1129,6 @@ dependencies = [
  "serde",
  "serde-xml-rs",
  "sysinfo",
- "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-test",

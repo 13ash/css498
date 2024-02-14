@@ -10,10 +10,10 @@ use tonic::{Request};
 use adler::Adler32;
 
 use std::path::{PathBuf};
+use futures::SinkExt;
 use tonic::codegen::Body;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use crate::block::{BLOCK_CHUNK_SIZE, BLOCK_SIZE};
-
 
 
 pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Result<(), RSHDFSError> {
@@ -84,6 +84,8 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
 }
 
 pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Result<Vec<String>, RSHDFSError> {
+    const MAX_READ_BUFFER_SIZE: usize = 2 * 1024 * 1024; // 2MB read buffer size
+
     let blocks = response.blocks.clone();
 
     for block in blocks.iter().cloned() {
@@ -91,12 +93,30 @@ pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Res
         local_file.seek(SeekFrom::Start(offset)).await
             .map_err(|_| RSHDFSError::FileSystemError(String::from("Failed to seek in file")))?;
 
-
         let mut block_buffer = vec![0; BLOCK_SIZE];
-        println!("{}", block_buffer.len());
-        let buffer_size = local_file.read_exact(&mut block_buffer).await?;
-        println!("buffer_size: {}", buffer_size);
-        block_buffer.truncate(buffer_size);
+        let mut total_read = 0;
+
+        // Read into block_buffer in 2MB increments until it's filled or EOF
+        loop {
+            if total_read >= BLOCK_SIZE {
+                break; // Exit if the block buffer is full
+            }
+
+            let mut read_buffer = vec![0; MAX_READ_BUFFER_SIZE];
+            let read_bytes = local_file.read(&mut read_buffer).await
+                .map_err(|_| RSHDFSError::FileSystemError(String::from("Failed to read from file")))?;
+
+            if read_bytes == 0 {
+                break; // EOF reached
+            }
+
+            for byte in 0..read_bytes {
+                block_buffer[total_read + byte] = read_buffer[byte]
+            }
+            total_read += read_bytes;
+        }
+        block_buffer.truncate(total_read);
+        let buffer_size = block_buffer.len();
 
         for addr in block.datanodes.clone() {
             let mut datanode_client = RshdfsDataNodeServiceClient::connect(format!("http://{}", addr)).await
@@ -147,4 +167,3 @@ pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Res
 
     Ok(blocks.iter().map(|block| block.block_id.clone()).collect())
 }
-  
