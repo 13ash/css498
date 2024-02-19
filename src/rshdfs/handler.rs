@@ -77,7 +77,7 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
             let mut data_buffer = Vec::new();
             temp_file.read_to_end(&mut data_buffer).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
             final_file.write_all(&data_buffer).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
-            tokio::fs::remove_file(temp_file_path.clone()).await?;
+            tokio::fs::remove_file(temp_file_path).await?;
         }
     }
 
@@ -85,7 +85,7 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
 }
 
 pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Result<Vec<String>, RSHDFSError> {
-    const MAX_READ_BUFFER_SIZE: usize = 2 * 1024 * 1024; // 2MB read buffer size
+    const MAX_READ_BUFFER_SIZE: usize = 1024; // 1KB read buffer size
 
     let blocks = response.blocks.clone();
 
