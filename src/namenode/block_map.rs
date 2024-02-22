@@ -39,8 +39,8 @@ impl BlockMap {
     }
 
     pub fn modify_block_metadata<F>(&self, block_id: Uuid, modify: F) -> Result<(), RSHDFSError>
-        where
-            F: FnOnce(&mut BlockMetadata),
+    where
+        F: FnOnce(&mut BlockMetadata),
     {
         let mut blocks_guard = self
             .blocks
@@ -55,7 +55,6 @@ impl BlockMap {
             }
         }
     }
-
 
     pub fn remove_block(&self, block_id: Uuid) -> Result<(), RSHDFSError> {
         let mut blocks_guard = self
