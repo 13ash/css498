@@ -16,12 +16,7 @@ use crate::namenode::block_map::BlockMap;
 
 use crate::proto::data_node_name_node_service_server::DataNodeNameNodeService;
 use crate::proto::rshdfs_name_node_service_server::RshdfsNameNodeService;
-use crate::proto::{
-    BlockMetadata as ProtoBlockMetadata, ConfirmFilePutRequest, ConfirmFilePutResponse, GetRequest,
-    GetResponse, HeartBeatRequest, HeartBeatResponse, LsRequest, LsResponse, PutFileRequest,
-    PutFileResponse, RegistrationRequest, RegistrationResponse, WriteBlockUpdateRequest,
-    WriteBlockUpdateResponse,
-};
+use crate::proto::{BlockMetadata as ProtoBlockMetadata, ConfirmFileDeleteRequest, ConfirmFileDeleteResponse, ConfirmFilePutRequest, ConfirmFilePutResponse, DeleteFileRequest, DeleteFileResponse, GetRequest, GetResponse, HeartBeatRequest, HeartBeatResponse, LsRequest, LsResponse, PutFileRequest, PutFileResponse, RegistrationRequest, RegistrationResponse, WriteBlockUpdateRequest, WriteBlockUpdateResponse};
 
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -534,6 +529,36 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         }))
     }
 
+    async fn delete_file(
+        &self,
+        request: Request<DeleteFileRequest>,
+    ) -> Result<Response<DeleteFileResponse>, Status> {
+        let mut proto_blocks = vec![];
+        // set the status of the blocks to await deletion
+        let inner_request = request.into_inner();
+        let path = inner_request.path;
+        match self.get_file_blocks(PathBuf::from(path)).await {
+            Ok(file_blocks) => {
+                for block in file_blocks {
+                    self.block_map.modify_block_metadata(block.id, |block| block.status = BlockStatus::AwaitingDeletion)?;
+                    proto_blocks.push(ProtoBlockMetadata {
+                        block_id: block.id.to_string(),
+                        seq: block.seq,
+                        datanodes: block.datanodes.clone(),
+                    })
+                }
+                Ok(Response::new(DeleteFileResponse {
+                    file_blocks: proto_blocks
+                }))
+            },
+            Err(e) => {
+                Err(Status::from(e))
+            }
+
+        }
+
+    }
+
     async fn confirm_file_put(
         &self,
         request: Request<ConfirmFilePutRequest>,
@@ -554,6 +579,38 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         {
             Ok(_) => Ok(Response::new(ConfirmFilePutResponse { success: true })),
             Err(e) => Err(Status::from(e)),
+        }
+    }
+
+    async fn confirm_file_delete(
+        &self,
+        request: Request<ConfirmFileDeleteRequest>,
+    ) -> Result<Response<ConfirmFileDeleteResponse>, Status> {
+        // if successfully deleted all the blocks from the data node
+        let inner_request = request.into_inner();
+        match inner_request.success {
+            true => {
+                for block_id in inner_request.block_ids.iter() {
+                    let block_uuid = Uuid::parse_str(block_id)
+                        .map_err(|_| RSHDFSError::UUIDError(String::from("Invalid UUID String")))?;
+                    self.block_map.remove_block(block_uuid)?;
+                }
+
+                //todo: remove inode from namespace
+
+                Ok(Response::new(ConfirmFileDeleteResponse {
+                    success: true,
+                }))
+            }
+            // trigger rollback
+            false => {
+                for block_id in inner_request.block_ids.iter() {
+                    let block_uuid = Uuid::parse_str(block_id)
+                        .map_err(|_| RSHDFSError::UUIDError(String::from("Invalid UUID String")))?;
+                    self.block_map.modify_block_metadata(block_uuid, |block| block.status = BlockStatus::Written)?;
+                }
+                Err(Status::internal(String::from("Failed to rollback block states.")))
+            }
         }
     }
 }

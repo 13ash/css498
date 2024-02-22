@@ -3,8 +3,8 @@
 
   The client_protocol supports file operations and directory operations
 
-  1. File Operations: open, create, delete, append, rename
-  2. Directory Operations: mkdir, ls, get_metadata, is_directory
+  1. File Operations: get, put, delete
+  2. Directory Operations: ls
  */
 
 syntax = "proto3";
@@ -48,12 +48,31 @@ message ConfirmFilePutResponse {
   bool success = 1;
 }
 
+message DeleteFileRequest {
+  string path = 1;
+}
+
+message DeleteFileResponse {
+  repeated BlockMetadata file_blocks = 1;
+}
+
+message ConfirmFileDeleteRequest {
+  bool success = 1;
+  repeated string block_ids = 2;
+}
+
+message ConfirmFileDeleteResponse {
+    bool success = 1;
+}
+
 
 service RSHDFSNameNodeService {
   rpc Get(GetRequest) returns (GetResponse);
   rpc Ls(LsRequest) returns (LsResponse);
   rpc PutFile(PutFileRequest) returns (PutFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
   rpc ConfirmFilePut(ConfirmFilePutRequest) returns (ConfirmFilePutResponse);
+  rpc ConfirmFileDelete(ConfirmFileDeleteRequest) returns (ConfirmFileDeleteResponse);
 }
 
 

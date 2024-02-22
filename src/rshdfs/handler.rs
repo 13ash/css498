@@ -2,21 +2,26 @@ use std::collections::HashMap;
 use std::io::SeekFrom;
 
 use crate::error::RSHDFSError;
-use crate::proto::{rshdfs_data_node_service_client::RshdfsDataNodeServiceClient, GetResponse, GetBlockRequest, PutFileResponse, BlockChunk, BlockStreamInfo};
-use tokio::fs::File;
-use tokio::sync::mpsc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
-use tonic::{Request};
+use crate::proto::{
+    rshdfs_data_node_service_client::RshdfsDataNodeServiceClient, BlockChunk, BlockStreamInfo,
+    DeleteBlockRequest, DeleteFileResponse, GetBlockRequest, GetResponse, PutFileResponse,
+};
 use adler::Adler32;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::mpsc;
+use tonic::Request;
 
-use std::path::{PathBuf};
-use futures::SinkExt;
-use tonic::codegen::Body;
-use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use crate::block::{BLOCK_CHUNK_SIZE, BLOCK_SIZE};
+use futures::SinkExt;
+use std::path::PathBuf;
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
+use tonic::codegen::Body;
 
-
-pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Result<(), RSHDFSError> {
+pub async fn get_handler(
+    final_data_path: PathBuf,
+    response: GetResponse,
+) -> Result<(), RSHDFSError> {
     let mut block_map = HashMap::new();
     let block_metadata_vec = response.file_blocks;
 
@@ -24,9 +29,10 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
         let mut success = false;
 
         for addr in block.datanodes.iter() {
-            let mut datanode_client = RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
-                .await
-                .map_err(|e| RSHDFSError::ConnectionError(e.to_string()))?;
+            let mut datanode_client =
+                RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
+                    .await
+                    .map_err(|e| RSHDFSError::ConnectionError(e.to_string()))?;
             let get_block_request = GetBlockRequest {
                 block_id: block.block_id.clone(),
             };
@@ -39,7 +45,11 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
 
             let mut block_buffer = Vec::new();
 
-            while let Some(chunk_result) = stream.message().await.map_err(|e| RSHDFSError::GrpcError(e.to_string()))? {
+            while let Some(chunk_result) = stream
+                .message()
+                .await
+                .map_err(|e| RSHDFSError::GrpcError(e.to_string()))?
+            {
                 let chunk = chunk_result;
                 let mut adler = Adler32::new();
                 adler.write_slice(&chunk.chunked_data);
@@ -54,29 +64,46 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
 
             if success {
                 let temp_file_path = format!("/tmp/{}.tmp", block.block_id);
-                let mut temp_file = File::create(&temp_file_path).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
-                temp_file.write_all(&block_buffer).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+                let mut temp_file = File::create(&temp_file_path)
+                    .await
+                    .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+                temp_file
+                    .write_all(&block_buffer)
+                    .await
+                    .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
                 block_map.insert(block.seq, temp_file_path);
                 break;
             }
         }
 
         if !success {
-            return Err(RSHDFSError::DataValidationError("Failed to validate block data from any datanode.".to_string()));
+            return Err(RSHDFSError::DataValidationError(
+                "Failed to validate block data from any datanode.".to_string(),
+            ));
         }
     }
 
-    let mut final_file = File::create(&final_data_path).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+    let mut final_file = File::create(&final_data_path)
+        .await
+        .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
 
     let mut keys: Vec<_> = block_map.keys().collect();
     keys.sort();
 
     for key in keys {
         if let Some(temp_file_path) = block_map.get(key) {
-            let mut temp_file = File::open(temp_file_path).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+            let mut temp_file = File::open(temp_file_path)
+                .await
+                .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
             let mut data_buffer = Vec::new();
-            temp_file.read_to_end(&mut data_buffer).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
-            final_file.write_all(&data_buffer).await.map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+            temp_file
+                .read_to_end(&mut data_buffer)
+                .await
+                .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
+            final_file
+                .write_all(&data_buffer)
+                .await
+                .map_err(|e| RSHDFSError::IOError(e.to_string()))?;
             tokio::fs::remove_file(temp_file_path).await?;
         }
     }
@@ -84,14 +111,19 @@ pub async fn get_handler(final_data_path: PathBuf, response: GetResponse) -> Res
     Ok(())
 }
 
-pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Result<Vec<String>, RSHDFSError> {
+pub async fn put_handler(
+    mut local_file: File,
+    response: PutFileResponse,
+) -> Result<Vec<String>, RSHDFSError> {
     const MAX_READ_BUFFER_SIZE: usize = 1024; // 1KB read buffer size
 
     let blocks = response.blocks.clone();
 
     for block in blocks.iter().cloned() {
         let offset = block.seq as u64 * BLOCK_SIZE as u64;
-        local_file.seek(SeekFrom::Start(offset)).await
+        local_file
+            .seek(SeekFrom::Start(offset))
+            .await
             .map_err(|_| RSHDFSError::FileSystemError(String::from("Failed to seek in file")))?;
 
         let mut block_buffer = vec![0; BLOCK_SIZE];
@@ -104,8 +136,9 @@ pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Res
             }
 
             let mut read_buffer = vec![0; MAX_READ_BUFFER_SIZE];
-            let read_bytes = local_file.read(&mut read_buffer).await
-                .map_err(|_| RSHDFSError::FileSystemError(String::from("Failed to read from file")))?;
+            let read_bytes = local_file.read(&mut read_buffer).await.map_err(|_| {
+                RSHDFSError::FileSystemError(String::from("Failed to read from file"))
+            })?;
 
             if read_bytes == 0 {
                 break; // EOF reached
@@ -120,18 +153,21 @@ pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Res
         let buffer_size = block_buffer.len();
 
         for addr in block.datanodes.clone() {
-            let mut datanode_client = RshdfsDataNodeServiceClient::connect(format!("http://{}", addr)).await
-                .map_err(|_| RSHDFSError::ConnectionError(String::from("unable to connect")))?;
+            let mut datanode_client =
+                RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
+                    .await
+                    .map_err(|_| RSHDFSError::ConnectionError(String::from("unable to connect")))?;
 
             let start_put_block_stream_request = Request::new(BlockStreamInfo {
                 block_id: block.block_id.clone(),
                 block_seq: block.seq,
             });
-            let response = datanode_client.start_block_stream(start_put_block_stream_request).await;
+            let response = datanode_client
+                .start_block_stream(start_put_block_stream_request)
+                .await;
             if response.is_err() {
                 return Err(RSHDFSError::WriteError("Failed to write.".to_string()));
             }
-
 
             let (client, server) = mpsc::channel::<BlockChunk>(10);
             let receiver_stream = ReceiverStream::new(server);
@@ -157,14 +193,43 @@ pub async fn put_handler(mut local_file: File, response: PutFileResponse) -> Res
                         checksum,
                     };
                     seq += 1;
-                    client.send(block_chunk).await.expect("Failed to send chunk");
+                    client
+                        .send(block_chunk)
+                        .await
+                        .expect("Failed to send chunk");
                 }
             });
 
-            datanode_client.put_block_streamed(Request::new(receiver_stream)).await
+            datanode_client
+                .put_block_streamed(Request::new(receiver_stream))
+                .await
                 .map_err(|e| RSHDFSError::GrpcError(e.to_string()))?;
         }
     }
 
     Ok(blocks.iter().map(|block| block.block_id.clone()).collect())
+}
+
+pub async fn delete_handler(response: DeleteFileResponse) -> Result<(), RSHDFSError> {
+    let file_blocks = response.file_blocks;
+
+    for block in file_blocks.iter() {
+        for addr in block.datanodes.iter() {
+            let mut client =
+                RshdfsDataNodeServiceClient::connect(format!("http://{}", addr)).await?;
+            let delete_block_request = Request::new(DeleteBlockRequest {
+                block_id: block.block_id.clone(),
+            });
+            let result = client.delete_block(delete_block_request).await;
+            match result {
+                Ok(_) => {}
+                Err(_e) => {
+                    return Err(RSHDFSError::FileSystemError(String::from(
+                        "Failed to delete block.",
+                    )))
+                }
+            }
+        }
+    }
+    Ok(())
 }

@@ -5,8 +5,10 @@ use rs_hdfs::error::{RSHDFSError, Result};
 
 use rs_hdfs::config::rshdfs_config::RSHDFSConfig;
 use rs_hdfs::proto::rshdfs_name_node_service_client::RshdfsNameNodeServiceClient;
-use rs_hdfs::proto::{ConfirmFilePutRequest, GetRequest, LsRequest, PutFileRequest};
-use rs_hdfs::rshdfs::handler::{get_handler, put_handler};
+use rs_hdfs::proto::{
+    ConfirmFilePutRequest, DeleteFileRequest, GetRequest, LsRequest, PutFileRequest,
+};
+use rs_hdfs::rshdfs::handler::{delete_handler, get_handler, put_handler};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -112,6 +114,16 @@ async fn main() -> Result<()> {
                 Err(e) => {
                     eprintln!("Error: {:?}", e);
                 }
+            }
+        }
+        Commands::Delete { fp } => {
+            let request = DeleteFileRequest { path: fp.clone() };
+            let unmatched_response = namenode_client.delete_file(request).await;
+            match unmatched_response {
+                Ok(response) => {
+                    delete_handler(response.into_inner()).await?;
+                }
+                Err(e) => eprintln!("Error deleting blocks: {:?}", e),
             }
         }
         _ => {

@@ -9,6 +9,7 @@ pub enum BlockStatus {
     Waiting = 0,
     InProgress = 1,
     Written = 2,
+    AwaitingDeletion = 3,
 }
 
 #[derive(Debug, Clone)]

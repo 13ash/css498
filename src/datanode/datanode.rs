@@ -1,29 +1,31 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::hash::Hasher;
 use std::path::PathBuf;
 
 use crate::config::datanode_config::DataNodeConfig;
 use crate::error::RSHDFSError;
 
+use crate::block::BLOCK_CHUNK_SIZE;
 use crate::proto::data_node_name_node_service_client::DataNodeNameNodeServiceClient;
 use crate::proto::rshdfs_data_node_service_server::RshdfsDataNodeService;
-use crate::proto::{BlockChunk, BlockStreamInfo, GetBlockRequest, HeartBeatRequest, NodeHealthMetrics, RegistrationRequest, RegistrationResponse, TransferStatus};
-use std::sync::{Arc};
-use std::time::Duration;
+use crate::proto::{
+    BlockChunk, BlockStreamInfo, DeleteBlockRequest, DeleteBlockResponse, GetBlockRequest,
+    HeartBeatRequest, NodeHealthMetrics, RegistrationRequest, RegistrationResponse, TransferStatus,
+};
 use adler::Adler32;
+use std::sync::Arc;
+use std::time::Duration;
 use sysinfo::System;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::time;
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
+use tonic::codegen::tokio_stream::StreamExt;
+use tonic::codegen::Body;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Response, Status, Streaming};
-use tonic::codegen::Body;
-use tonic::codegen::tokio_stream::StreamExt;
-use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
-use crate::block::BLOCK_CHUNK_SIZE;
-
 
 /// Manages the sending of heartbeats to the NameNode at regular intervals.
 struct HeartbeatManager {
@@ -42,7 +44,6 @@ struct BlockPayload {
 struct BlockInfo {
     block_seq: i32,
 }
-
 
 impl HeartbeatManager {
     fn new(
@@ -203,7 +204,10 @@ async fn gather_metrics() -> Result<NodeHealthMetrics, RSHDFSError> {
 
 #[tonic::async_trait]
 impl RshdfsDataNodeService for DataNode {
-    async fn put_block_streamed(&self, request: Request<Streaming<BlockChunk>>) -> Result<Response<TransferStatus>, Status> {
+    async fn put_block_streamed(
+        &self,
+        request: Request<Streaming<BlockChunk>>,
+    ) -> Result<Response<TransferStatus>, Status> {
         let mut stream = request.into_inner();
 
         // Grab the first block off the stream
@@ -214,7 +218,10 @@ impl RshdfsDataNodeService for DataNode {
         };
 
         // Create a file based on the first block's information
-        let file_path = format!("{}/{}_{}.dat", self.data_dir, first_chunk.block_id, first_chunk.block_seq);
+        let file_path = format!(
+            "{}/{}_{}.dat",
+            self.data_dir, first_chunk.block_id, first_chunk.block_seq
+        );
         let mut file = match File::create(&file_path).await {
             Ok(file) => file,
             Err(e) => return Err(Status::internal(format!("Failed to create file: {}", e))),
@@ -239,7 +246,6 @@ impl RshdfsDataNodeService for DataNode {
             let checksum = adler.checksum();
 
             if block_chunk.checksum == checksum && seq == block_chunk.chunk_seq {
-
                 // Write the chunk's data to the file
                 if let Err(e) = file.write_all(&block_chunk.chunked_data).await {
                     return Err(Status::internal(format!("Failed to write to file: {}", e)));
@@ -268,8 +274,12 @@ impl RshdfsDataNodeService for DataNode {
 
         let block_info = self.get_block_info(block_id_uuid).await?;
         let block_info_seq = block_info.block_seq;
-        let file_path = PathBuf::from(format!("{}/{}_{}.dat", self.data_dir, block_id, block_info_seq));
-        let mut file = File::open(&file_path).await
+        let file_path = PathBuf::from(format!(
+            "{}/{}_{}.dat",
+            self.data_dir, block_id, block_info_seq
+        ));
+        let mut file = File::open(&file_path)
+            .await
             .map_err(|_| Status::internal("Failed to open file"))?;
 
         let (sender, receiver) = mpsc::channel(15);
@@ -312,12 +322,16 @@ impl RshdfsDataNodeService for DataNode {
         Ok(Response::new(ReceiverStream::new(receiver)))
     }
 
-    async fn start_block_stream(&self, request: Request<BlockStreamInfo>) -> Result<Response<TransferStatus>, Status> {
+    async fn start_block_stream(
+        &self,
+        request: Request<BlockStreamInfo>,
+    ) -> Result<Response<TransferStatus>, Status> {
         let block_stream_info = request.into_inner();
         let block_info = BlockInfo {
             block_seq: block_stream_info.block_seq,
         };
-        let block_uuid = Uuid::parse_str(&block_stream_info.block_id).map_err(|_| RSHDFSError::UUIDError(String::from("Bad UUID string.")))?;
+        let block_uuid = Uuid::parse_str(&block_stream_info.block_id)
+            .map_err(|_| RSHDFSError::UUIDError(String::from("Bad UUID string.")))?;
         let mut blocks_guard = self.blocks.write().await;
 
         blocks_guard.insert(block_uuid, block_info);
@@ -325,5 +339,34 @@ impl RshdfsDataNodeService for DataNode {
             success: true,
             message: "Block information updated.".to_string(),
         }))
+    }
+    async fn delete_block(
+        &self,
+        request: Request<DeleteBlockRequest>,
+    ) -> Result<Response<DeleteBlockResponse>, Status> {
+        let inner_request = request.into_inner();
+        let block_id = inner_request.block_id;
+        let block_uuid = Uuid::parse_str(&block_id)
+            .map_err(|_| RSHDFSError::UUIDError(String::from("Bad UUID string.")))?;
+        let blocks_guard = self.blocks.read().await;
+        let maybe_block_info = blocks_guard.get(&block_uuid);
+
+        return match maybe_block_info {
+            None => Err(Status::internal(String::from("Block not found."))),
+            Some(block_info) => {
+                let file_path = PathBuf::from(format!(
+                    "{}/{}_{}.dat",
+                    self.data_dir, block_id, block_info.block_seq
+                ));
+                let result = tokio::fs::remove_file(file_path).await;
+                match result {
+                    Ok(_) => Ok(Response::new(DeleteBlockResponse {
+                        success: true,
+                        message: String::from("Block removed."),
+                    })),
+                    Err(e) => Err(Status::from(e)),
+                }
+            }
+        };
     }
 }

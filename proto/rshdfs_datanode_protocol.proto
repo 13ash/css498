@@ -7,6 +7,7 @@ service RSHDFSDataNodeService {
   rpc PutBlockStreamed( stream BlockChunk) returns (TransferStatus) {}
   rpc GetBlockStreamed(GetBlockRequest) returns (stream BlockChunk) {}
   rpc StartBlockStream(BlockStreamInfo) returns (TransferStatus) {}
+  rpc DeleteBlock(DeleteBlockRequest) returns (DeleteBlockResponse) {}
 }
 
 message TransferStatus {
@@ -40,4 +41,13 @@ message BlockChunk {
   int32 chunk_seq = 3;
   bytes chunked_data = 4;
   uint32 checksum = 5;
+}
+
+message DeleteBlockRequest {
+  string block_id = 1;
+}
+
+message DeleteBlockResponse {
+  bool success = 1;
+  string message = 2;
 }

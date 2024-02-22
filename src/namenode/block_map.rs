@@ -2,6 +2,7 @@ use crate::block::BlockMetadata;
 use crate::error::RSHDFSError;
 
 use std::collections::HashMap;
+
 use std::sync::RwLock;
 use uuid::Uuid;
 
@@ -34,6 +35,36 @@ impl BlockMap {
         match blocks_guard.get(&block_id) {
             None => Err(RSHDFSError::BlockMapError(String::from("Block not found."))),
             Some(block) => Ok(block.clone()),
+        }
+    }
+
+    pub fn modify_block_metadata<F>(&self, block_id: Uuid, modify: F) -> Result<(), RSHDFSError>
+        where
+            F: FnOnce(&mut BlockMetadata),
+    {
+        let mut blocks_guard = self
+            .blocks
+            .write()
+            .map_err(|_| RSHDFSError::LockError(String::from("Failed to acquire write lock")))?;
+
+        match blocks_guard.get_mut(&block_id) {
+            None => Err(RSHDFSError::BlockMapError(String::from("Block not found"))),
+            Some(block_metadata) => {
+                modify(block_metadata);
+                Ok(())
+            }
+        }
+    }
+
+
+    pub fn remove_block(&self, block_id: Uuid) -> Result<(), RSHDFSError> {
+        let mut blocks_guard = self
+            .blocks
+            .write()
+            .map_err(|_| RSHDFSError::LockError(String::from("Failed to acquire write lock")))?;
+        match blocks_guard.remove(&block_id) {
+            None => Err(RSHDFSError::BlockMapError(String::from("Block not found."))),
+            Some(_) => Ok(()),
         }
     }
 }
