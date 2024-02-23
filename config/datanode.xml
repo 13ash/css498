@@ -5,5 +5,5 @@
     <port>50002</port>
     <namenode.address>namenode:50000</namenode.address>
     <heartbeat.interval>3000</heartbeat.interval>
-    <block.report.interval>21600000</block.report.interval>
+    <block.report.interval>1000000</block.report.interval>
 </dataNodeConfig>

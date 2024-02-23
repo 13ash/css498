@@ -1,7 +1,7 @@
 use rs_hdfs::config::datanode_config::DataNodeConfig;
 use rs_hdfs::datanode::datanode::DataNode;
 use rs_hdfs::error::Result;
-use rs_hdfs::proto::rshdfs_data_node_service_server::RshdfsDataNodeServiceServer;
+use rs_hdfs::proto::rshdfs_block_service_server::RshdfsBlockServiceServer;
 use tokio;
 use tonic::transport::Server;
 
@@ -12,10 +12,11 @@ async fn main() -> Result<()> {
     let config = DataNodeConfig::from_xml_file("config/datanode.xml")?;
     let addr = config.ipc_address.parse().unwrap();
     let mut data_node = DataNode::from_config(config).await?;
+    let block_manager = data_node.block_manager.clone();
     data_node.start().await?;
 
     Server::builder()
-        .add_service(RshdfsDataNodeServiceServer::new(data_node))
+        .add_service(RshdfsBlockServiceServer::new(block_manager))
         .serve(addr)
         .await?;
 

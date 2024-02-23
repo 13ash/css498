@@ -72,7 +72,6 @@ service RSHDFSNameNodeService {
   rpc PutFile(PutFileRequest) returns (PutFileResponse);
   rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
   rpc ConfirmFilePut(ConfirmFilePutRequest) returns (ConfirmFilePutResponse);
-  rpc ConfirmFileDelete(ConfirmFileDeleteRequest) returns (ConfirmFileDeleteResponse);
 }
 
 

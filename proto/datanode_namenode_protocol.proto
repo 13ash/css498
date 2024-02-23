@@ -22,6 +22,7 @@ package rs_hdfs.proto;
 
 service DataNodeNameNodeService {
   rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
+  rpc SendBlockReport(BlockReportRequest) returns (BlockReportResponse) {}
   rpc RegisterWithNamenode(RegistrationRequest) returns (RegistrationResponse) {}
   rpc WriteBlockUpdate(WriteBlockUpdateRequest) returns (WriteBlockUpdateResponse) {}
 
@@ -58,6 +59,14 @@ message WriteBlockUpdateRequest {
 
 message WriteBlockUpdateResponse {
   bool success = 1;
+}
+
+message BlockReportRequest {
+   repeated string block_ids = 1;
+}
+
+message BlockReportResponse {
+    repeated string block_ids = 1;
 }
 
 

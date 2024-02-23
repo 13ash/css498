@@ -10,14 +10,13 @@ use tonic::{async_trait, Request, Response, Status};
 use uuid::Uuid;
 
 use crate::config::namenode_config::NameNodeConfig;
-use crate::datanode::block_report::BlockReport;
 use crate::error::RSHDFSError;
 use crate::namenode::block_map::BlockMap;
 
 use crate::proto::data_node_name_node_service_server::DataNodeNameNodeService;
 use crate::proto::rshdfs_name_node_service_server::RshdfsNameNodeService;
 use crate::proto::{
-    BlockMetadata as ProtoBlockMetadata, ConfirmFileDeleteRequest, ConfirmFileDeleteResponse,
+    BlockMetadata as ProtoBlockMetadata, BlockReportRequest, BlockReportResponse,
     ConfirmFilePutRequest, ConfirmFilePutResponse, DeleteFileRequest, DeleteFileResponse,
     GetRequest, GetResponse, HeartBeatRequest, HeartBeatResponse, LsRequest, LsResponse,
     PutFileRequest, PutFileResponse, RegistrationRequest, RegistrationResponse,
@@ -25,7 +24,7 @@ use crate::proto::{
 };
 
 #[cfg(test)]
-use mockall::{automock, predicate::*};
+use mockall::automock;
 
 #[derive(Debug, Clone)]
 pub enum INode {
@@ -59,7 +58,6 @@ impl INode {
 #[derive(Debug, Clone, PartialEq)]
 enum DataNodeStatus {
     HEALTHY,
-    UNHEALTHY,
     DEFAULT,
 }
 
@@ -69,7 +67,6 @@ pub struct DataNode {
     id: Uuid,
     addr: String,
     status: DataNodeStatus,
-    block_report: BlockReport,
 }
 
 impl PartialEq for DataNode {
@@ -80,13 +77,8 @@ impl PartialEq for DataNode {
 
 impl DataNode {
     /// Creates a new instance of DataNode.
-    fn new(id: Uuid, addr: String, status: DataNodeStatus, block_report: BlockReport) -> Self {
-        DataNode {
-            id,
-            addr,
-            status,
-            block_report,
-        }
+    fn new(id: Uuid, addr: String, status: DataNodeStatus) -> Self {
+        DataNode { id, addr, status }
     }
 }
 
@@ -96,6 +88,7 @@ impl DataNode {
 #[async_trait]
 trait NamespaceManager {
     async fn add_inode_to_namespace(&self, path: PathBuf, inode: INode) -> Result<(), RSHDFSError>;
+    async fn remove_inode_from_namespace(&self, path: PathBuf) -> Result<(), RSHDFSError>;
     async fn ls_inodes(&self, path: PathBuf) -> Result<Vec<String>, RSHDFSError>;
     async fn add_block_to_file(
         &self,
@@ -243,6 +236,72 @@ impl NamespaceManager for NameNode {
         }
     }
 
+    async fn remove_inode_from_namespace(&self, path: PathBuf) -> Result<(), RSHDFSError> {
+        let mut namespace_guard = self
+            .namespace
+            .write()
+            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
+
+        if path.components().count() == 0 {
+            return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
+        }
+
+        // Collect path components to a Vec to allow indexing
+        let components: Vec<_> = path.iter().collect();
+        if components.is_empty() {
+            return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
+        }
+
+        let mut current_node = &mut *namespace_guard;
+
+        // Iterate over the path components to the parent of the node to remove
+        for component in components.iter().take(components.len() - 1) {
+            let component_str = component.to_str().ok_or_else(|| {
+                RSHDFSError::InvalidPathError("Invalid path component".to_string())
+            })?;
+
+            match current_node {
+                INode::Directory { children, .. } => {
+                    if let Some(node) = children.get_mut(component_str) {
+                        current_node = node;
+                    } else {
+                        return Err(RSHDFSError::FileSystemError(format!(
+                            "Path component '{}' not found",
+                            component_str
+                        )));
+                    }
+                }
+                _ => {
+                    return Err(RSHDFSError::FileSystemError(format!(
+                        "'{}' is not a directory",
+                        component_str
+                    )))
+                }
+            }
+        }
+
+        // Remove the target inode
+        if let Some(component) = components.last().and_then(|c| c.to_str()) {
+            if let INode::Directory { children, .. } = current_node {
+                if children.remove(component).is_some() {
+                    Ok(())
+                } else {
+                    Err(RSHDFSError::FileSystemError(
+                        "Node to remove not found".to_string(),
+                    ))
+                }
+            } else {
+                Err(RSHDFSError::FileSystemError(
+                    "Parent is not a directory".to_string(),
+                ))
+            }
+        } else {
+            Err(RSHDFSError::InvalidPathError(
+                "Invalid target component".to_string(),
+            ))
+        }
+    }
+
     async fn ls_inodes(&self, path: PathBuf) -> Result<Vec<String>, RSHDFSError> {
         let namespace_read_guard = self
             .namespace
@@ -304,7 +363,6 @@ impl NamespaceManager for NameNode {
             INode::File {
                 ref mut block_ids, ..
             } => {
-                // Add the block to the BlockMap and store the block ID in the file inode
                 self.block_map.add_block(block_metadata.clone());
                 block_ids.push(block_metadata.id);
                 Ok(block_ids.clone())
@@ -395,23 +453,52 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         request: Request<HeartBeatRequest>,
     ) -> Result<Response<HeartBeatResponse>, Status> {
         let datanode_id_str = request.into_inner().datanode_id;
-        println!("Received heartbeat from {:?}", datanode_id_str);
-
         let datanode_id = Uuid::from_str(&datanode_id_str)
             .map_err(|_| Status::invalid_argument("Invalid DataNode ID format"))?;
 
         let mut datanodes = self.datanodes.write().unwrap(); // todo: unwrap
 
         if let Some(datanode) = datanodes.iter_mut().find(|dn| dn.id == datanode_id) {
-            if matches!(
-                datanode.status,
-                DataNodeStatus::UNHEALTHY | DataNodeStatus::DEFAULT
-            ) {
+            if matches!(datanode.status, DataNodeStatus::DEFAULT) {
                 datanode.status = DataNodeStatus::HEALTHY;
             }
         }
 
         Ok(Response::new(HeartBeatResponse { success: true }))
+    }
+
+    async fn send_block_report(
+        &self,
+        request: Request<BlockReportRequest>,
+    ) -> Result<Response<BlockReportResponse>, Status> {
+        let inner_request = request.into_inner();
+        let block_ids = inner_request.block_ids;
+        let mut uuid_vec = vec![];
+        let mut ready_to_delete = vec![];
+
+        for block_id in block_ids.iter() {
+            let block_uuid = Uuid::parse_str(&block_id)
+                .map_err(|_| RSHDFSError::UUIDError(String::from("Invalid UUID String.")))?;
+            uuid_vec.push(block_uuid);
+        }
+
+        for block_uuid in uuid_vec {
+            match self.block_map.get_block(block_uuid) {
+                Ok(block) => {
+                    if block.status == BlockStatus::AwaitingDeletion {
+                        ready_to_delete.push(block.id.to_string());
+                    }
+                }
+                Err(e) => {
+                    return Err(Status::from(e));
+                }
+            }
+        }
+
+        let response = BlockReportResponse {
+            block_ids: ready_to_delete,
+        };
+        Ok(Response::new(response))
     }
 
     /// Handles registration request from a DataNode.
@@ -436,7 +523,6 @@ impl DataNodeNameNodeService for Arc<NameNode> {
             unwrapped_request_id,
             inner_request.hostname_port,
             DataNodeStatus::DEFAULT,
-            BlockReport::new(unwrapped_request_id, Vec::new()),
         ));
 
         Ok(Response::new(response))
@@ -530,9 +616,7 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         }
 
         // Send block information to client
-        Ok(Response::new(PutFileResponse {
-            blocks: block_info, // Send this information to the client
-        }))
+        Ok(Response::new(PutFileResponse { blocks: block_info }))
     }
 
     async fn delete_file(
@@ -543,8 +627,9 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         // set the status of the blocks to await deletion
         let inner_request = request.into_inner();
         let path = inner_request.path;
-        match self.get_file_blocks(PathBuf::from(path)).await {
+        match self.get_file_blocks(PathBuf::from(path.clone())).await {
             Ok(file_blocks) => {
+                self.remove_inode_from_namespace(PathBuf::from(path.clone())).await;
                 for block in file_blocks {
                     self.block_map.modify_block_metadata(block.id, |block| {
                         block.status = BlockStatus::AwaitingDeletion
@@ -555,6 +640,8 @@ impl RshdfsNameNodeService for Arc<NameNode> {
                         datanodes: block.datanodes.clone(),
                     })
                 }
+                println!("{:?}", proto_blocks);
+
                 Ok(Response::new(DeleteFileResponse {
                     file_blocks: proto_blocks,
                 }))
@@ -583,40 +670,6 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         {
             Ok(_) => Ok(Response::new(ConfirmFilePutResponse { success: true })),
             Err(e) => Err(Status::from(e)),
-        }
-    }
-
-    async fn confirm_file_delete(
-        &self,
-        request: Request<ConfirmFileDeleteRequest>,
-    ) -> Result<Response<ConfirmFileDeleteResponse>, Status> {
-        // if successfully deleted all the blocks from the data node
-        let inner_request = request.into_inner();
-        match inner_request.success {
-            true => {
-                for block_id in inner_request.block_ids.iter() {
-                    let block_uuid = Uuid::parse_str(block_id)
-                        .map_err(|_| RSHDFSError::UUIDError(String::from("Invalid UUID String")))?;
-                    self.block_map.remove_block(block_uuid)?;
-                }
-
-                //todo: remove inode from namespace
-
-                Ok(Response::new(ConfirmFileDeleteResponse { success: true }))
-            }
-            // trigger rollback
-            false => {
-                for block_id in inner_request.block_ids.iter() {
-                    let block_uuid = Uuid::parse_str(block_id)
-                        .map_err(|_| RSHDFSError::UUIDError(String::from("Invalid UUID String")))?;
-                    self.block_map.modify_block_metadata(block_uuid, |block| {
-                        block.status = BlockStatus::Written
-                    })?;
-                }
-                Err(Status::internal(String::from(
-                    "Failed to rollback block states.",
-                )))
-            }
         }
     }
 }
@@ -705,7 +758,7 @@ mod tests {
             .times(1)
             .returning(|path, _inode| {
                 Err(RSHDFSError::FileSystemError(format!(
-                    "'{}' is not a directory",
+                    "{} is not a directory",
                     path.to_str().unwrap()
                 )))
             });

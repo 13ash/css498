@@ -3,11 +3,10 @@ syntax = "proto3";
 
 package rs_hdfs.proto;
 
-service RSHDFSDataNodeService {
+service RSHDFSBlockService {
   rpc PutBlockStreamed( stream BlockChunk) returns (TransferStatus) {}
   rpc GetBlockStreamed(GetBlockRequest) returns (stream BlockChunk) {}
   rpc StartBlockStream(BlockStreamInfo) returns (TransferStatus) {}
-  rpc DeleteBlock(DeleteBlockRequest) returns (DeleteBlockResponse) {}
 }
 
 message TransferStatus {
@@ -30,24 +29,10 @@ message GetBlockResponse {
   bytes block_data = 3;
 }
 
-message PutBlockResponse {
-  bool success = 1;
-  string message = 2;
-}
-
 message BlockChunk {
   string block_id = 1;
   int32 block_seq = 2;
   int32 chunk_seq = 3;
   bytes chunked_data = 4;
   uint32 checksum = 5;
-}
-
-message DeleteBlockRequest {
-  string block_id = 1;
-}
-
-message DeleteBlockResponse {
-  bool success = 1;
-  string message = 2;
 }

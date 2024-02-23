@@ -8,7 +8,7 @@ use rs_hdfs::proto::rshdfs_name_node_service_client::RshdfsNameNodeServiceClient
 use rs_hdfs::proto::{
     ConfirmFilePutRequest, DeleteFileRequest, GetRequest, LsRequest, PutFileRequest,
 };
-use rs_hdfs::rshdfs::handler::{delete_handler, get_handler, put_handler};
+use rs_hdfs::rshdfs::handler::{ClientHandler, HandlerManager};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
     let config = RSHDFSConfig::from_xml_file("/config/rshdfs.xml")?;
     let mut namenode_client =
         RshdfsNameNodeServiceClient::connect(format!("http://{}", config.namenode_address)).await?;
+    let client_handler = ClientHandler::new();
 
     match &args.command {
         Commands::Get { fp } => {
@@ -57,7 +58,7 @@ async fn main() -> Result<()> {
                     if let Some(file_name) = file_pathbuf.file_name() {
                         let file_name_str = file_name.to_string_lossy();
                         let new_path = PathBuf::from(format!("/tmp/{}", file_name_str));
-                        get_handler(new_path, response.into_inner()).await?;
+                        client_handler.get(new_path, response.into_inner()).await?;
                     } else {
                         eprintln!("Error: The file path does not have a file name component.");
                     }
@@ -95,7 +96,7 @@ async fn main() -> Result<()> {
                 Ok(response) => {
                     let inner_response = response.into_inner().clone();
 
-                    match put_handler(local_file, inner_response).await {
+                    match client_handler.put(local_file, inner_response).await {
                         Ok(written_blocks) => {
                             match namenode_client
                                 .confirm_file_put(ConfirmFilePutRequest {
@@ -121,7 +122,7 @@ async fn main() -> Result<()> {
             let unmatched_response = namenode_client.delete_file(request).await;
             match unmatched_response {
                 Ok(response) => {
-                    delete_handler(response.into_inner()).await?;
+                    println!("{:?}", response);
                 }
                 Err(e) => eprintln!("Error deleting blocks: {:?}", e),
             }
