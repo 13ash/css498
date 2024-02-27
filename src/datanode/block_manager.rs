@@ -76,7 +76,10 @@ impl BlockManager {
                             for block_id in inner_response.block_ids.iter() {
                                 if let Ok(block_uuid) = Uuid::parse_str(block_id) {
                                     if let Some(block) = block_guard.get(&block_uuid) {
-                                        let path = format!("{}/{}_{}.dat", self_clone.data_dir, block_id, block.block_seq);
+                                        let path = format!(
+                                            "{}/{}_{}.dat",
+                                            self_clone.data_dir, block_id, block.block_seq
+                                        );
                                         paths_to_delete.push((path, block_uuid));
                                     }
                                 } else {
@@ -104,8 +107,7 @@ impl BlockManager {
     }
 }
 
-
-    #[tonic::async_trait]
+#[tonic::async_trait]
 impl RshdfsBlockService for Arc<BlockManager> {
     async fn put_block_streamed(
         &self,

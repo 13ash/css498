@@ -8,7 +8,7 @@ use rs_hdfs::proto::rshdfs_name_node_service_client::RshdfsNameNodeServiceClient
 use rs_hdfs::proto::{
     ConfirmFilePutRequest, DeleteFileRequest, GetRequest, LsRequest, PutFileRequest,
 };
-use rs_hdfs::rshdfs::client::{RSHDFSClient, Client};
+use rs_hdfs::rshdfs::client::{Client, RSHDFSClient};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

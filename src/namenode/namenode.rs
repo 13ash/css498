@@ -629,7 +629,8 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         let path = inner_request.path;
         match self.get_file_blocks(PathBuf::from(path.clone())).await {
             Ok(file_blocks) => {
-                self.remove_inode_from_namespace(PathBuf::from(path.clone())).await;
+                self.remove_inode_from_namespace(PathBuf::from(path.clone()))
+                    .await;
                 for block in file_blocks {
                     self.block_map.modify_block_metadata(block.id, |block| {
                         block.status = BlockStatus::AwaitingDeletion
