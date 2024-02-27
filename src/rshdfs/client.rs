@@ -17,7 +17,7 @@ use crate::proto::rshdfs_block_service_client::RshdfsBlockServiceClient;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 
 #[async_trait]
-pub trait HandlerManager {
+pub trait RSHDFSClient {
     async fn get(&self, final_data_path: PathBuf, response: GetResponse)
         -> Result<(), RSHDFSError>;
     async fn put(
@@ -27,15 +27,15 @@ pub trait HandlerManager {
     ) -> Result<Vec<String>, RSHDFSError>;
 }
 
-pub struct ClientHandler;
-impl ClientHandler {
+pub struct Client;
+impl Client {
     pub fn new() -> Self {
-        ClientHandler {}
+        Client {}
     }
 }
 
 #[async_trait]
-impl HandlerManager for ClientHandler {
+impl RSHDFSClient for Client {
     async fn get(
         &self,
         final_data_path: PathBuf,
