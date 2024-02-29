@@ -106,13 +106,13 @@ trait DatanodeManager {
 }
 
 pub struct NameNode {
-    id: Uuid,
-    data_dir: String,
-    ipc_address: String,
-    replication_factor: i8,
-    datanodes: RwLock<Vec<DataNode>>,
-    namespace: Arc<RwLock<INode>>,
-    block_map: BlockMap,
+    pub id: Uuid,
+    pub data_dir: String,
+    pub ipc_address: String,
+    pub replication_factor: i8,
+    pub datanodes: RwLock<Vec<DataNode>>,
+    pub namespace: Arc<RwLock<INode>>,
+    pub block_map: BlockMap,
 }
 
 impl NameNode {

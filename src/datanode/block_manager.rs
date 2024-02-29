@@ -27,10 +27,10 @@ pub struct BlockInfo {
 /// Manages the sending of the block report to the NameNode at regular intervals
 /// Manages the Blocks on the DataNodes local disk.
 pub struct BlockManager {
-    datanode_service_client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
-    data_dir: String,
+    pub datanode_service_client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
+    pub data_dir: String,
     pub blocks: Arc<RwLock<HashMap<Uuid, BlockInfo>>>,
-    interval: Duration,
+    pub interval: Duration,
 }
 
 impl BlockManager {
@@ -188,9 +188,9 @@ impl RshdfsBlockService for Arc<BlockManager> {
             "{}/{}_{}.dat",
             self.data_dir, block_id, block_info_seq
         ));
-        let mut file = File::open(&file_path)
-            .await
-            .map_err(|_| Status::internal("Failed to open file"))?;
+        let mut file = File::open(&file_path).await.map_err(|_| {
+            RSHDFSError::ReadError(format!("File at {:?} cannot be opened.", file_path))
+        })?;
 
         let (sender, receiver) = mpsc::channel(15);
 
