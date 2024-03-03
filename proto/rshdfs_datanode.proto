@@ -3,7 +3,9 @@ syntax = "proto3";
 
 package rs_hdfs.proto;
 
-service RSHDFSBlockService {
+import "common.proto";
+
+service RSHDFSDataNodeService {
   rpc PutBlockStreamed( stream BlockChunk) returns (TransferStatus) {}
   rpc GetBlockStreamed(GetBlockRequest) returns (stream BlockChunk) {}
   rpc StartBlockStream(BlockStreamInfo) returns (TransferStatus) {}

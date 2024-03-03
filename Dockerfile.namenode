@@ -35,12 +35,12 @@ EXPOSE 50000
 
 # Copy the compiled binary from the build stage to the final image
 COPY --from=build /root/rust_hdfs/config/namenode.xml /config/namenode.xml
-COPY --from=build /root/rust_hdfs/target/release/rs_hdfs_namenode /bin/rs_hdfs_namenode
+COPY --from=build /root/rust_hdfs/target/release/rshdfs_namenode /bin/rshdfs_namenode
 
 # Ensure the binary is executable
-RUN chmod +x /bin/rs_hdfs_namenode
+RUN chmod +x /bin/rshdfs_namenode
 
 RUN mkdir -p /hdfs/namenode/
 
 # Define the default command to run the DataNode
-CMD ["/bin/rs_hdfs_namenode"]
+CMD ["/bin/rshdfs_namenode"]

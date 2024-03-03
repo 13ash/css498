@@ -4,9 +4,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .compile(
             &[
-                "proto/rshdfs_block_protocol.proto",
-                "proto/rshdfs_namenode_protocol.proto",
-                "datanode_namenode_protocol.proto",
+                "proto/rshdfs_datanode.proto",
+                "proto/rshdfs_namenode.proto",
+                "proto/datanode_namenode.proto",
                 "proto/common.proto",
             ],
             &["proto"],

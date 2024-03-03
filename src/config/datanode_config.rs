@@ -20,12 +20,16 @@ pub struct DataNodeConfig {
 
     #[serde(rename = "block.report.interval")]
     pub block_report_interval: u64,
+
+    #[serde(rename = "metrics.interval")]
+    pub metrics_interval: u64,
 }
 
 impl DataNodeConfig {
     pub fn from_xml_file(file_path: &str) -> Result<Self, RSHDFSError> {
         let xml_str = std::fs::read_to_string(file_path).unwrap();
         let config: DataNodeConfig = serde_xml_rs::from_str(&xml_str)?;
+
         Ok(config)
     }
 }

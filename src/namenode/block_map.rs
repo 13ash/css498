@@ -9,7 +9,7 @@ use uuid::Uuid;
 /// Central data-structure used by the NameNode to track block locations.
 pub struct BlockMap {
     // Maps a block ID to a Block and the DataNodes storing it.
-    blocks: RwLock<HashMap<Uuid, BlockMetadata>>,
+    pub blocks: RwLock<HashMap<Uuid, BlockMetadata>>,
 }
 
 impl BlockMap {

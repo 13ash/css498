@@ -10,10 +10,9 @@ use tokio::sync::mpsc;
 use tonic::Request;
 
 use crate::block::{BLOCK_CHUNK_SIZE, BLOCK_SIZE};
+use crate::proto::rshdfs_data_node_service_client::RshdfsDataNodeServiceClient;
 use async_trait::async_trait;
 use std::path::PathBuf;
-
-use crate::proto::rshdfs_block_service_client::RshdfsBlockServiceClient;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 
 #[async_trait]
@@ -49,7 +48,7 @@ impl RSHDFSClient for Client {
 
             for addr in block.datanodes.iter() {
                 let mut datanode_client =
-                    RshdfsBlockServiceClient::connect(format!("http://{}", addr))
+                    RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
                         .await
                         .map_err(|e| RSHDFSError::ConnectionError(e.to_string()))?;
                 let get_block_request = GetBlockRequest {
@@ -176,7 +175,7 @@ impl RSHDFSClient for Client {
 
             for addr in block.datanodes.clone() {
                 let mut block_manager_client =
-                    RshdfsBlockServiceClient::connect(format!("http://{}", addr))
+                    RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
                         .await
                         .map_err(|_| {
                             RSHDFSError::ConnectionError(String::from("unable to connect"))

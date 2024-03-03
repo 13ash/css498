@@ -25,7 +25,6 @@ use crate::proto::{
 
 #[cfg(test)]
 use mockall::automock;
-
 #[derive(Debug, Clone)]
 pub enum INode {
     Directory {
@@ -56,7 +55,7 @@ impl INode {
 
 /// Represents the possible states of a DataNode.
 #[derive(Debug, Clone, PartialEq)]
-enum DataNodeStatus {
+pub enum DataNodeStatus {
     HEALTHY,
     DEFAULT,
 }
@@ -64,9 +63,9 @@ enum DataNodeStatus {
 /// Represents a DataNode in the distributed file system.
 #[derive(Debug, Clone)]
 pub struct DataNode {
-    id: Uuid,
-    addr: String,
-    status: DataNodeStatus,
+    pub id: Uuid,
+    pub addr: String,
+    pub status: DataNodeStatus,
 }
 
 impl PartialEq for DataNode {
@@ -147,7 +146,10 @@ impl NameNode {
                     let name_str = name
                         .to_str()
                         .ok_or_else(|| {
-                            RSHDFSError::PathError(format!("Invalid path component: {:?}", name))
+                            RSHDFSError::InvalidPathError(format!(
+                                "Invalid path component: {:?}",
+                                name
+                            ))
                         })?
                         .to_string();
 
@@ -155,18 +157,21 @@ impl NameNode {
                     match node {
                         INode::Directory { children, .. } => {
                             node = children.get_mut(&name_str).ok_or_else(|| {
-                                RSHDFSError::PathError(format!("Path not found: {:?}", name_str))
+                                RSHDFSError::InvalidPathError(format!(
+                                    "Path not found: {:?}",
+                                    name_str
+                                ))
                             })?;
                         }
                         INode::File { .. } => {
                             // If a file is encountered in the middle of the path, return an error
-                            return Err(RSHDFSError::PathError(
+                            return Err(RSHDFSError::InvalidPathError(
                                 "Encountered file in path to directory".to_string(),
                             ));
                         }
                     }
                 }
-                _ => return Err(RSHDFSError::PathError("Invalid path".to_string())),
+                _ => return Err(RSHDFSError::InvalidPathError("Invalid path".to_string())),
             }
         }
         Ok(node)
@@ -265,14 +270,14 @@ impl NamespaceManager for NameNode {
                     if let Some(node) = children.get_mut(component_str) {
                         current_node = node;
                     } else {
-                        return Err(RSHDFSError::FileSystemError(format!(
+                        return Err(RSHDFSError::InvalidPathError(format!(
                             "Path component '{}' not found",
                             component_str
                         )));
                     }
                 }
                 _ => {
-                    return Err(RSHDFSError::FileSystemError(format!(
+                    return Err(RSHDFSError::InvalidPathError(format!(
                         "'{}' is not a directory",
                         component_str
                     )))
@@ -452,7 +457,9 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         &self,
         request: Request<HeartBeatRequest>,
     ) -> Result<Response<HeartBeatResponse>, Status> {
-        let datanode_id_str = request.into_inner().datanode_id;
+        let inner_request = request.into_inner();
+        eprintln!(" Received Heartbeat: {:?}",inner_request.clone());
+        let datanode_id_str = inner_request.datanode_id;
         let datanode_id = Uuid::from_str(&datanode_id_str)
             .map_err(|_| Status::invalid_argument("Invalid DataNode ID format"))?;
 
@@ -465,6 +472,31 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         }
 
         Ok(Response::new(HeartBeatResponse { success: true }))
+    }
+    async fn register_with_namenode(
+        &self,
+        request: Request<RegistrationRequest>,
+    ) -> Result<Response<RegistrationResponse>, Status> {
+        println!("Received registration {:?}", request);
+        let inner_request = request.into_inner();
+
+        let unwrapped_request_id = Uuid::from_str(&inner_request.datanode_id)
+            .map_err(|_| Status::invalid_argument("Invalid DataNode ID format"))?;
+
+        let _health_metrics = inner_request
+            .health_metrics
+            .ok_or_else(|| Status::invalid_argument("Missing health metrics"))?;
+
+        //let success = health_metrics.cpu_load < 3.0 && health_metrics.memory_usage < 50.0;
+        let response = RegistrationResponse { success: true };
+
+        self.datanodes.write().unwrap().push(DataNode::new(
+            unwrapped_request_id,
+            inner_request.hostname_port,
+            DataNodeStatus::DEFAULT,
+        ));
+
+        Ok(Response::new(response))
     }
 
     async fn send_block_report(
@@ -501,53 +533,11 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         Ok(Response::new(response))
     }
 
-    /// Handles registration request from a DataNode.
-    async fn register_with_namenode(
-        &self,
-        request: Request<RegistrationRequest>,
-    ) -> Result<Response<RegistrationResponse>, Status> {
-        println!("Received registration {:?}", request);
-        let inner_request = request.into_inner();
-
-        let unwrapped_request_id = Uuid::from_str(&inner_request.datanode_id)
-            .map_err(|_| Status::invalid_argument("Invalid DataNode ID format"))?;
-
-        let _health_metrics = inner_request
-            .health_metrics
-            .ok_or_else(|| Status::invalid_argument("Missing health metrics"))?;
-
-        //let success = health_metrics.cpu_load < 3.0 && health_metrics.memory_usage < 50.0;
-        let response = RegistrationResponse { success: true };
-
-        self.datanodes.write().unwrap().push(DataNode::new(
-            unwrapped_request_id,
-            inner_request.hostname_port,
-            DataNodeStatus::DEFAULT,
-        ));
-
-        Ok(Response::new(response))
-    }
-
     async fn write_block_update(
         &self,
-        request: Request<WriteBlockUpdateRequest>,
+        _request: Request<WriteBlockUpdateRequest>,
     ) -> Result<Response<WriteBlockUpdateResponse>, Status> {
-        let inner_request = request.into_inner();
-        let block_id = Uuid::parse_str(inner_request.block_id.as_str()).unwrap();
-        let status = inner_request.status;
-
-        let mut block_in_map = self.block_map.get_block(block_id)?;
-
-        return if status == BlockStatus::Written as i32 {
-            block_in_map.status = BlockStatus::Written;
-            Ok(Response::new(WriteBlockUpdateResponse { success: true }))
-        } else if status == BlockStatus::Waiting as i32 {
-            block_in_map.status = BlockStatus::Waiting;
-            Ok(Response::new(WriteBlockUpdateResponse { success: false }))
-        } else {
-            block_in_map.status == BlockStatus::InProgress;
-            Ok(Response::new(WriteBlockUpdateResponse { success: false }))
-        };
+        todo!()
     }
 }
 
@@ -590,9 +580,20 @@ impl RshdfsNameNodeService for Arc<NameNode> {
     ) -> Result<Response<PutFileResponse>, Status> {
         let inner_request = request.into_inner();
         let file_size = inner_request.file_size;
+
+        if file_size == 0u64 {
+            return Err(Status::from(RSHDFSError::FileSystemError(String::from(
+                "Invalid file size.",
+            ))));
+        }
+
         let num_blocks = (file_size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64;
 
-        let selected_datanodes = self.select_datanodes().await.map_err(Status::from)?;
+        let selected_datanodes = self.select_datanodes().await.map_err(|_| {
+            RSHDFSError::InsufficientDataNodes(String::from(
+                "Not enough datanodes to handle replication.",
+            ))
+        })?;
         let mut block_ids = Vec::new();
         let mut block_info = Vec::new();
 
@@ -772,6 +773,26 @@ mod tests {
             Err(RSHDFSError::FileSystemError(String::from(
                 "/a is not a directory"
             )))
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_inode_from_namespace_expects_invalid_path_error_empty() {
+        let test_path = PathBuf::from("");
+
+        let mut mock_namespace_manager = MockNamespaceManager::new();
+        mock_namespace_manager
+            .expect_remove_inode_from_namespace()
+            .times(1)
+            .returning(|_path| Err(RSHDFSError::InvalidPathError(String::from("Empty path"))));
+
+        let result = mock_namespace_manager
+            .remove_inode_from_namespace(test_path)
+            .await;
+
+        assert_eq!(
+            result,
+            Err(RSHDFSError::InvalidPathError(String::from("Empty path")))
         );
     }
 }

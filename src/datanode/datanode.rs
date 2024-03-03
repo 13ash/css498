@@ -1,123 +1,400 @@
+use crate::block::{BLOCK_CHUNK_SIZE};
 use crate::config::datanode_config::DataNodeConfig;
-use crate::datanode::block_manager::BlockManager;
-use crate::datanode::heartbeat_manager::HeartbeatManager;
 use crate::error::RSHDFSError;
 use crate::proto::data_node_name_node_service_client::DataNodeNameNodeServiceClient;
-use crate::proto::{NodeHealthMetrics, RegistrationRequest, RegistrationResponse};
+use crate::proto::data_node_name_node_service_server::DataNodeNameNodeService;
+use crate::proto::rshdfs_data_node_service_server::RshdfsDataNodeService;
+use crate::proto::{
+    BlockChunk, BlockReportRequest, BlockStreamInfo, GetBlockRequest, HeartBeatRequest,
+    NodeHealthMetrics, RegistrationRequest, RegistrationResponse, TransferStatus,
+};
+use adler::Adler32;
+use std::collections::{HashMap};
+use std::ffi::OsStr;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time;
-use sysinfo::System;
-use time::Duration;
-use tokio::sync::Mutex;
-use tonic::transport::{Channel, Endpoint};
+use sysinfo::{Disks, System};
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::Duration;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
+use tonic::transport::Channel;
+use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
+
+struct BlockInfo {
+    id: String,
+    seq: i32,
+}
+
+impl PartialEq<Self> for BlockInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.seq == other.seq
+    }
+}
+
+impl Eq for BlockInfo {}
+
+impl Hash for BlockInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+struct HealthMetrics {
+    cpu_load: f32,
+    memory_usage: u64,
+    disk_space: u64,
+}
+
+impl HealthMetrics {
+    pub fn init() -> Self {
+        HealthMetrics {
+            cpu_load: 0.0,
+            memory_usage: 0,
+            disk_space: 0,
+        }
+    }
+}
 
 /// Represents a DataNode in a distributed file system.
 pub struct DataNode {
     id: Uuid,
     data_dir: String,
-    client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
+    addr: String,
+    hostname_port: String,
+    datanode_namenode_service_client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
+    blocks: Arc<RwLock<HashMap<Uuid, BlockInfo>>>,
+    metrics: Arc<Mutex<HealthMetrics>>,
     heartbeat_interval: Duration,
     block_report_interval: Duration,
-    addr: String,
-    port: String,
-    namenode_addr: String,
-    heartbeat_manager: HeartbeatManager,
-    pub block_manager: Arc<BlockManager>,
+    metrics_interval: Duration,
 }
 
 impl DataNode {
-    /// Registers the DataNode with the NameNode and provides health metrics.
-    async fn register_with_namenode(
-        &self,
-        data_node_client: &mut DataNodeNameNodeServiceClient<Channel>,
-    ) -> Result<RegistrationResponse, RSHDFSError> {
-        let node_health_metrics = gather_metrics().await?;
-        let hostname = System::host_name().unwrap(); //todo: unwrap
-        let registration_request = RegistrationRequest {
-            datanode_id: self.id.to_string(),
-            ipc_address: self.addr.clone(),
-            hostname_port: format!("{}:{}", hostname, self.port),
-            health_metrics: Some(node_health_metrics),
-        };
-
-        data_node_client
-            .register_with_namenode(registration_request)
-            .await
-            .map_err(|_| {
-                RSHDFSError::RegistrationFailed(String::from(
-                    "Registration with the NameNode failed.",
-                ))
-            })
-            .map(|response| response.into_inner())
-    }
-
-    /// Creates a new DataNode from the provided configuration.
-    pub async fn from_config(config: DataNodeConfig) -> Result<Self, RSHDFSError> {
-        println!(
-            "Attempting to establish connection with: {}",
-            config.namenode_address
-        );
-        let id = Uuid::new_v4();
-        let endpoint = Endpoint::from_shared(format!("http://{}", config.namenode_address))?;
-        let client = DataNodeNameNodeServiceClient::connect(endpoint).await?;
-        let wrapped_client = Arc::new(Mutex::new(client));
-        let heartbeat_manager = HeartbeatManager::new(
-            wrapped_client.clone(),
-            Duration::from_millis(config.heartbeat_interval),
-            id,
-        );
-        let block_manager = Arc::new(BlockManager::new(
-            wrapped_client.clone(),
-            Duration::from_millis(config.block_report_interval),
-            config.data_dir.clone(),
-        ));
-
-        Ok(DataNode {
-            id,
-            client: wrapped_client,
+    pub async fn from_config(config: DataNodeConfig) -> Self {
+        DataNode {
+            id: Uuid::new_v4(),
             data_dir: config.data_dir,
-            heartbeat_interval: Duration::from_millis(config.heartbeat_interval),
-            block_report_interval: Duration::from_millis(config.block_report_interval),
             addr: config.ipc_address,
-            port: config.port,
-            namenode_addr: config.namenode_address,
-            heartbeat_manager,
-            block_manager,
-        })
+            hostname_port: format!("{}:{}", System::host_name().unwrap(), config.port),
+            datanode_namenode_service_client: Arc::new(Mutex::new(
+                DataNodeNameNodeServiceClient::connect(format!(
+                    "http://{}",
+                    config.namenode_address
+                ))
+                .await
+                .unwrap(),
+            )),
+            blocks: Arc::new(RwLock::new(HashMap::new())),
+            heartbeat_interval: Duration::from_millis(config.heartbeat_interval),
+            metrics: Arc::new(Mutex::new(HealthMetrics::init())),
+            block_report_interval: Duration::from_millis(config.block_report_interval),
+            metrics_interval: Duration::from_millis(config.metrics_interval),
+        }
     }
 
-    /// Starts the main operations of the DataNode, including registration and heartbeat sending.
     pub async fn start(&mut self) -> Result<(), RSHDFSError> {
-        // Step 1: Register with NameNode
-        let mut client_guard = self.client.lock().await;
-        let registration_response = self.register_with_namenode(&mut client_guard).await?;
-        drop(client_guard);
-        println!(
-            "Registered with NameNode: {}",
-            registration_response.success
-        );
-        println!("Starting HeartbeatManager...");
-        println!("Starting BlockReportManager...");
-
-        // Step 2: Start HeartbeatManager and BlockReportManager
-        self.heartbeat_manager.start().await;
-        self.block_manager.clone().start().await;
+        self.register_with_namenode().await?;
+        self.start_heartbeat_worker().await;
+        self.start_metrics_worker().await?;
+        self.start_block_report_worker().await?;
 
         Ok(())
     }
+
+    async fn start_heartbeat_worker(&self) {
+        let interval = self.heartbeat_interval;
+        let client = self.datanode_namenode_service_client.clone();
+        let metrics = self.metrics.clone();
+        let datanode_id_str = self.id.to_string();
+
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            loop {
+                interval_timer.tick().await;
+                let metrics_guard = metrics.lock().await;
+
+                let request = HeartBeatRequest {
+                    datanode_id: datanode_id_str.clone(),
+                    health_metrics: Some(NodeHealthMetrics {
+                        cpu_load: metrics_guard.cpu_load,
+                        memory_usage: metrics_guard.memory_usage,
+                        disk_space: metrics_guard.disk_space,
+                    }),
+                };
+                drop(metrics_guard);
+                eprintln!("Sending Heartbeat...");
+                let result = client.lock().await.send_heart_beat(request).await;
+
+                if let Err(e) = result {
+                    eprintln!("Heartbeat failed: {:?}", e);
+                }
+            }
+        });
+    }
+
+    async fn start_metrics_worker(&self) -> Result<(), RSHDFSError> {
+        let metrics = self.metrics.clone();
+        let interval = self.metrics_interval;
+        let data_dir = self.data_dir.clone();
+
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            loop {
+                interval_timer.tick().await;
+                let mut metrics_guard = metrics.lock().await;
+
+                let system_state = sysinfo::System::new_all();
+                match Disks::new_with_refreshed_list()
+                    .list()
+                    .iter()
+                    .find(|disk| disk.mount_point() == OsStr::new(&data_dir))
+                {
+                    None => {
+                        eprintln!("Mount point not found.");
+                        drop(metrics_guard);
+                    }
+                    Some(disk) => {
+                        metrics_guard.cpu_load = system_state.global_cpu_info().cpu_usage();
+                        metrics_guard.memory_usage =
+                            system_state.available_memory() / system_state.total_memory() * 100;
+                        metrics_guard.disk_space = disk.available_space();
+                        drop(metrics_guard);
+                    }
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn start_block_report_worker(&self) -> Result<(), RSHDFSError> {
+        let interval = self.block_report_interval.clone();
+        let blocks = self.blocks.clone();
+        let client = self.datanode_namenode_service_client.clone();
+        let data_dir = self.data_dir.clone();
+
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            loop {
+                interval_timer.tick().await;
+                let blocks_read_guard = blocks.read().await;
+                let mut request_vec = vec![];
+
+                for block_info in blocks_read_guard.values() {
+                    request_vec.push(block_info.id.clone());
+                }
+
+                drop(blocks_read_guard);
+
+                let request = BlockReportRequest {
+                    block_ids: request_vec,
+                };
+
+                eprintln!("Sending Block Report....");
+                match client.lock().await.send_block_report(request).await {
+                    Ok(response) => {
+                        let mut blocks_write_guard = blocks.write().await;
+                        let inner_response = response.into_inner();
+
+                        for block_id_str in inner_response.block_ids.iter() {
+                            let block_id = Uuid::parse_str(block_id_str)
+                                .expect("Invalid UUID in block report response");
+                            if let Some(block) =
+                                blocks_write_guard.get(&block_id)
+                            {
+                                let file_path =
+                                    format!("{}/{}_{}.dat", data_dir, block.id, block.seq);
+                                if let Err(e) = tokio::fs::remove_file(&file_path).await {
+                                    eprintln!("Failed to remove file {}: {}", file_path, e);
+                                } else {
+                                    blocks_write_guard.remove(&block_id);
+                                }
+                            } else {
+                                eprintln!("Block not found in local storage: {}", block_id);
+                            }
+                        }
+                    }
+                    Err(_) => eprintln!("Block Report Response Error"),
+                }
+            }
+        });
+        Ok(())
+    }
+
+    async fn register_with_namenode(&self) -> Result<Response<RegistrationResponse>, RSHDFSError> {
+        let metrics_guard = self.metrics.lock().await;
+        let request = RegistrationRequest {
+            datanode_id: self.id.to_string(),
+            hostname_port: self.hostname_port.clone(),
+            health_metrics: Some(NodeHealthMetrics {
+                cpu_load: metrics_guard.cpu_load,
+                memory_usage: metrics_guard.memory_usage,
+                disk_space: metrics_guard.disk_space,
+            }),
+        };
+        drop(metrics_guard);
+        match self
+            .datanode_namenode_service_client
+            .lock()
+            .await
+            .register_with_namenode(request)
+            .await
+            .map_err(|_| {
+                RSHDFSError::RegistrationError(String::from("Failed to register with Namenode."))
+            }) {
+            Ok(response) => Ok(response),
+            Err(e) => Err(e)
+        }
+    }
 }
 
-/// Gathers health metrics from the system for reporting to the NameNode.
-async fn gather_metrics() -> Result<NodeHealthMetrics, RSHDFSError> {
-    let mut system = System::new_all();
-    system.refresh_all();
+#[tonic::async_trait]
+impl RshdfsDataNodeService for DataNode {
+    async fn put_block_streamed(
+        &self,
+        request: Request<Streaming<BlockChunk>>,
+    ) -> Result<Response<TransferStatus>, Status> {
+        let mut stream = request.into_inner();
 
-    let cpu_load = system.global_cpu_info().cpu_usage() as f64;
-    let memory_usage = system.used_memory() as f64 / system.total_memory() as f64 * 100.0;
+        // Grab the first block off the stream
+        let first_chunk = match stream.next().await {
+            Some(Ok(chunk)) => chunk,
+            Some(Err(e)) => return Err(Status::aborted(format!("Failed to read chunk: {}", e))),
+            None => return Err(Status::invalid_argument("No chunks received")),
+        };
 
-    Ok(NodeHealthMetrics {
-        cpu_load,
-        memory_usage,
-    })
+        // Create a file based on the first block's information
+        let file_path = format!(
+            "{}/{}_{}.dat",
+            self.data_dir, first_chunk.block_id, first_chunk.block_seq
+        );
+        let mut file = match File::create(&file_path).await {
+            Ok(file) => file,
+            Err(e) => return Err(Status::internal(format!("Failed to create file: {}", e))),
+        };
+
+        // Write the first chunk's data to the file
+        if let Err(e) = file.write_all(&first_chunk.chunked_data).await {
+            return Err(Status::internal(format!("Failed to write to file: {}", e)));
+        }
+
+        // Loop to process remaining chunks
+        let mut seq = 1;
+        while let Some(chunk_result) = stream.next().await {
+            let block_chunk = match chunk_result {
+                Ok(chunk) => chunk,
+                Err(e) => return Err(Status::aborted(format!("Failed to read chunk: {}", e))),
+            };
+
+            // Validate the block_chunk
+            let mut adler = Adler32::new();
+            adler.write_slice(&block_chunk.chunked_data);
+            let checksum = adler.checksum();
+
+            if block_chunk.checksum == checksum && seq == block_chunk.chunk_seq {
+                // Write the chunk's data to the file
+                if let Err(e) = file.write_all(&block_chunk.chunked_data).await {
+                    return Err(Status::internal(format!("Failed to write to file: {}", e)));
+                }
+                seq += 1;
+            }
+        }
+
+        // Return transfer status
+        Ok(Response::new(TransferStatus {
+            success: true,
+            message: String::from("All chunks processed successfully"),
+        }))
+    }
+
+    type GetBlockStreamedStream = ReceiverStream<Result<BlockChunk, Status>>;
+
+    async fn get_block_streamed(
+        &self,
+        request: Request<GetBlockRequest>,
+    ) -> Result<Response<Self::GetBlockStreamedStream>, Status> {
+        let inner_request = request.into_inner();
+        let block_id = inner_request.block_id;
+        let block_id_uuid = Uuid::parse_str(&block_id)
+            .map_err(|_| Status::invalid_argument("Invalid UUID format."))?;
+
+
+        let blocks_guard = self.blocks.read().await;
+        let block_info = blocks_guard
+            .get(&block_id_uuid)
+            .ok_or(RSHDFSError::FileSystemError(String::from(
+                "Block not found.",
+            )))?;
+        let block_info_seq = block_info.seq;
+        let file_path = PathBuf::from(format!(
+            "{}/{}_{}.dat",
+            self.data_dir, block_id, block_info_seq
+        ));
+        let mut file = File::open(&file_path).await.map_err(|_| {
+            RSHDFSError::ReadError(format!("File at {:?} cannot be opened.", file_path))
+        })?;
+
+        let (sender, receiver) = mpsc::channel(15);
+
+        tokio::spawn(async move {
+            let mut seq = 0;
+            loop {
+                let mut chunk_sized_buffer = vec![0; BLOCK_CHUNK_SIZE];
+                let n = match file.read(&mut chunk_sized_buffer).await {
+                    Ok(n) if n == 0 => break, // End of file
+                    Ok(n) => n,
+                    Err(_) => {
+                        eprintln!("Error reading file chunk");
+                        break;
+                    }
+                };
+
+                chunk_sized_buffer.truncate(n); // Adjust buffer size to actual data read
+
+                let mut adler = Adler32::new();
+                adler.write_slice(&chunk_sized_buffer);
+                let checksum = adler.checksum();
+                let block_chunk = BlockChunk {
+                    block_id: block_id.clone(),
+                    block_seq: block_info_seq,
+                    chunked_data: chunk_sized_buffer,
+                    chunk_seq: seq,
+                    checksum,
+                };
+
+                if sender.send(Ok(block_chunk)).await.is_err() {
+                    eprintln!("Receiver dropped, stopping stream.");
+                    break;
+                }
+
+                seq += 1; // Increment the sequence for the next chunk
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(receiver)))
+    }
+
+    async fn start_block_stream(
+        &self,
+        request: Request<BlockStreamInfo>,
+    ) -> Result<Response<TransferStatus>, Status> {
+        let block_stream_info = request.into_inner();
+        let block_uuid = Uuid::parse_str(&block_stream_info.block_id)
+            .map_err(|_| RSHDFSError::UUIDError(String::from("Bad UUID string.")))?;
+        let block_info = BlockInfo {
+            id: block_uuid.to_string(),
+            seq: block_stream_info.block_seq,
+        };
+
+        let mut blocks_guard = self.blocks.write().await;
+        blocks_guard.insert(block_uuid, block_info);
+        Ok(Response::new(TransferStatus {
+            success: true,
+            message: "Block information updated.".to_string(),
+        }))
+    }
 }

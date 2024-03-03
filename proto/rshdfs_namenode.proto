@@ -12,6 +12,15 @@ import "common.proto";
 
 package rs_hdfs.proto;
 
+service RSHDFSNameNodeService {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Ls(LsRequest) returns (LsResponse);
+  rpc PutFile(PutFileRequest) returns (PutFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  rpc ConfirmFilePut(ConfirmFilePutRequest) returns (ConfirmFilePutResponse);
+}
+
+
 
 message GetRequest {
   string path = 1;
@@ -63,15 +72,6 @@ message ConfirmFileDeleteRequest {
 
 message ConfirmFileDeleteResponse {
     bool success = 1;
-}
-
-
-service RSHDFSNameNodeService {
-  rpc Get(GetRequest) returns (GetResponse);
-  rpc Ls(LsRequest) returns (LsResponse);
-  rpc PutFile(PutFileRequest) returns (PutFileResponse);
-  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
-  rpc ConfirmFilePut(ConfirmFilePutRequest) returns (ConfirmFilePutResponse);
 }
 
 

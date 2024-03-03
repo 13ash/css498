@@ -4,6 +4,7 @@
     <ipc.address>0.0.0.0:50002</ipc.address>
     <port>50002</port>
     <namenode.address>namenode:50000</namenode.address>
-    <heartbeat.interval>3000</heartbeat.interval>
-    <block.report.interval>1000000</block.report.interval>
+    <heartbeat.interval>10000</heartbeat.interval>
+    <block.report.interval>300000</block.report.interval>
+    <metrics.interval>600000</metrics.interval>
 </dataNodeConfig>

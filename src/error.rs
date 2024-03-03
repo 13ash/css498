@@ -4,6 +4,7 @@ use tonic::Status;
 
 #[derive(Debug, PartialEq)]
 pub enum RSHDFSError {
+    DiskError(String),
     ConfigError(String),
     ConnectionError(String),
     ChecksumError(String),
@@ -15,12 +16,11 @@ pub enum RSHDFSError {
     InsufficientSpace(String),
     InsufficientDataNodes(String),
     HeartBeatFailed(String),
-    RegistrationFailed(String),
+    RegistrationError(String),
     LockError(String),
     BlockMapError(String),
     ReadError(String),
     WriteError(String),
-    PathError(String),
     DataValidationError(String),
     GrpcError(String),
     StreamError(String),

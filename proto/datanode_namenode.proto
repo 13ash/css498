@@ -10,8 +10,7 @@
                  The signal interval is configurable but defaults to 3 seconds.
 
 
-  2. Block Report - A message sent to the NameNode with information about the DataNode's block.
-                    BlockID, TimeStamp, BlockSize, Replications
+  2. Registration - A signal sent to the NameNode to notify it that this datanode would like to join the cluster.
 
  */
 
@@ -22,14 +21,15 @@ package rs_hdfs.proto;
 
 service DataNodeNameNodeService {
   rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse) {}
-  rpc SendBlockReport(BlockReportRequest) returns (BlockReportResponse) {}
   rpc RegisterWithNamenode(RegistrationRequest) returns (RegistrationResponse) {}
+  rpc SendBlockReport(BlockReportRequest) returns (BlockReportResponse) {}
   rpc WriteBlockUpdate(WriteBlockUpdateRequest) returns (WriteBlockUpdateResponse) {}
 
 }
 
 message HeartBeatRequest {
   string datanode_id = 1;
+  NodeHealthMetrics health_metrics = 2;
 }
 
 message HeartBeatResponse {
@@ -38,17 +38,30 @@ message HeartBeatResponse {
 
 message RegistrationRequest {
   string datanode_id = 1;
-  string ipc_address= 2;
-  string hostname_port = 3;
-  NodeHealthMetrics health_metrics = 4;
+  string hostname_port = 2;
+  NodeHealthMetrics health_metrics = 3;
 }
 
 message NodeHealthMetrics {
-  double cpu_load = 1;
-  double memory_usage = 2;
+  float cpu_load = 1;
+  uint64 memory_usage = 2;
+  uint64 disk_space = 3;
 }
 
 message RegistrationResponse {
+  bool success = 1;
+}
+
+message BlockReportRequest {
+  repeated string block_ids = 1;
+}
+
+message BlockReportResponse {
+  repeated string block_ids = 1;
+}
+
+
+message WriteBlockUpdateResponse {
   bool success = 1;
 }
 
@@ -56,18 +69,3 @@ message WriteBlockUpdateRequest {
   string block_id = 1;
   BlockStatus status = 2;
 }
-
-message WriteBlockUpdateResponse {
-  bool success = 1;
-}
-
-message BlockReportRequest {
-   repeated string block_ids = 1;
-}
-
-message BlockReportResponse {
-    repeated string block_ids = 1;
-}
-
-
-
