@@ -10,6 +10,7 @@ pub enum RSHDFSError {
     ChecksumError(String),
     TonicError(String),
     ProtoError(String),
+    PutBlockStreamedError(String),
     FileSystemError(String),
     InvalidPathError(String),
     IOError(String),
@@ -19,6 +20,7 @@ pub enum RSHDFSError {
     RegistrationError(String),
     LockError(String),
     BlockMapError(String),
+    MetricsError(String),
     ReadError(String),
     WriteError(String),
     DataValidationError(String),
@@ -76,6 +78,7 @@ impl From<RSHDFSError> for Status {
             RSHDFSError::InvalidPathError(msg) => Status::invalid_argument(msg),
             RSHDFSError::FileSystemError(msg) => Status::internal(msg),
             RSHDFSError::LockError(msg) => Status::aborted(msg),
+            RSHDFSError::PutBlockStreamedError(msg) => Status::internal(msg),
             _ => Status::unknown("Unknown error"),
         }
     }

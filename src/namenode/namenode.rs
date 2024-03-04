@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use crate::block::{BlockMetadata, BlockStatus, BLOCK_SIZE};
+use ::tokio::sync::RwLock;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
-
+use std::sync::Arc;
 use tonic::{async_trait, Request, Response, Status};
 use uuid::Uuid;
 
@@ -181,10 +181,7 @@ impl NameNode {
 #[async_trait]
 impl NamespaceManager for NameNode {
     async fn add_inode_to_namespace(&self, path: PathBuf, inode: INode) -> Result<(), RSHDFSError> {
-        let mut namespace_guard = self
-            .namespace
-            .write()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
+        let mut namespace_guard = self.namespace.write().await;
 
         if path.components().count() == 0 {
             return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
@@ -242,10 +239,7 @@ impl NamespaceManager for NameNode {
     }
 
     async fn remove_inode_from_namespace(&self, path: PathBuf) -> Result<(), RSHDFSError> {
-        let mut namespace_guard = self
-            .namespace
-            .write()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
+        let mut namespace_guard = self.namespace.write().await;
 
         if path.components().count() == 0 {
             return Err(RSHDFSError::InvalidPathError("Empty path".to_string()));
@@ -308,10 +302,7 @@ impl NamespaceManager for NameNode {
     }
 
     async fn ls_inodes(&self, path: PathBuf) -> Result<Vec<String>, RSHDFSError> {
-        let namespace_read_guard = self
-            .namespace
-            .read()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire read lock".to_string()))?;
+        let namespace_read_guard = self.namespace.read().await;
 
         // Start at the root of the namespace
         let mut current_node = &*namespace_read_guard;
@@ -354,10 +345,7 @@ impl NamespaceManager for NameNode {
         path_buf: PathBuf,
         block_metadata: BlockMetadata,
     ) -> Result<Vec<Uuid>, RSHDFSError> {
-        let mut namespace_write_guard = self
-            .namespace
-            .write()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire write lock".to_string()))?;
+        let mut namespace_write_guard = self.namespace.write().await;
         let path = Path::new(path_buf.as_os_str());
         let inode = Self::traverse_to_inode(&mut namespace_write_guard, path)?;
 
@@ -368,7 +356,7 @@ impl NamespaceManager for NameNode {
             INode::File {
                 ref mut block_ids, ..
             } => {
-                self.block_map.add_block(block_metadata.clone());
+                self.block_map.add_block(block_metadata.clone()).await;
                 block_ids.push(block_metadata.id);
                 Ok(block_ids.clone())
             }
@@ -377,10 +365,7 @@ impl NamespaceManager for NameNode {
 
     // Method to get file blocks retrieves BlockMetadata from BlockMap
     async fn get_file_blocks(&self, path: PathBuf) -> Result<Vec<BlockMetadata>, RSHDFSError> {
-        let namespace_read_guard = self
-            .namespace
-            .read()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire read lock".to_string()))?;
+        let namespace_read_guard = self.namespace.read().await;
 
         let mut current_node = &*namespace_read_guard;
 
@@ -411,7 +396,7 @@ impl NamespaceManager for NameNode {
             // Retrieve actual BlockMetadata from BlockMap
             let mut blocks = vec![];
             for block_id in block_ids {
-                let block = self.block_map.get_block(*block_id)?;
+                let block = self.block_map.get_block(*block_id).await?;
                 blocks.push(block);
             }
             Ok(blocks)
@@ -426,10 +411,7 @@ impl NamespaceManager for NameNode {
 #[async_trait]
 impl DatanodeManager for NameNode {
     async fn select_datanodes(&self) -> Result<Vec<String>, RSHDFSError> {
-        let datanodes_read_guard = self
-            .datanodes
-            .read()
-            .map_err(|_| RSHDFSError::LockError("Failed to acquire read lock".to_string()))?;
+        let datanodes_read_guard = self.datanodes.read().await;
         let mut selected_datanodes = vec![];
         for datanode in datanodes_read_guard.iter() {
             if datanode.status == DataNodeStatus::HEALTHY
@@ -458,12 +440,15 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         request: Request<HeartBeatRequest>,
     ) -> Result<Response<HeartBeatResponse>, Status> {
         let inner_request = request.into_inner();
-        eprintln!(" Received Heartbeat: {:?}",inner_request.clone());
+        eprintln!(" Received Heartbeat: {:?}", inner_request.clone());
         let datanode_id_str = inner_request.datanode_id;
-        let datanode_id = Uuid::from_str(&datanode_id_str)
-            .map_err(|_| Status::invalid_argument("Invalid DataNode ID format"))?;
+        let datanode_id = Uuid::from_str(&datanode_id_str).map_err(|_| {
+            Status::from(RSHDFSError::HeartBeatFailed(
+                "Invalid Uuid string.".to_string(),
+            ))
+        })?;
 
-        let mut datanodes = self.datanodes.write().unwrap(); // todo: unwrap
+        let mut datanodes = self.datanodes.write().await; // todo: unwrap
 
         if let Some(datanode) = datanodes.iter_mut().find(|dn| dn.id == datanode_id) {
             if matches!(datanode.status, DataNodeStatus::DEFAULT) {
@@ -490,7 +475,7 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         //let success = health_metrics.cpu_load < 3.0 && health_metrics.memory_usage < 50.0;
         let response = RegistrationResponse { success: true };
 
-        self.datanodes.write().unwrap().push(DataNode::new(
+        self.datanodes.write().await.push(DataNode::new(
             unwrapped_request_id,
             inner_request.hostname_port,
             DataNodeStatus::DEFAULT,
@@ -515,7 +500,7 @@ impl DataNodeNameNodeService for Arc<NameNode> {
         }
 
         for block_uuid in uuid_vec {
-            match self.block_map.get_block(block_uuid) {
+            match self.block_map.get_block(block_uuid).await {
                 Ok(block) => {
                     if block.status == BlockStatus::AwaitingDeletion {
                         ready_to_delete.push(block.id.to_string());
@@ -613,7 +598,7 @@ impl RshdfsNameNodeService for Arc<NameNode> {
                 seq: seq as i32,
                 datanodes: selected_datanodes.clone(),
             });
-            self.block_map.add_block(new_block);
+            self.block_map.add_block(new_block).await;
         }
 
         // Send block information to client
@@ -631,11 +616,13 @@ impl RshdfsNameNodeService for Arc<NameNode> {
         match self.get_file_blocks(PathBuf::from(path.clone())).await {
             Ok(file_blocks) => {
                 self.remove_inode_from_namespace(PathBuf::from(path.clone()))
-                    .await;
+                    .await?;
                 for block in file_blocks {
-                    self.block_map.modify_block_metadata(block.id, |block| {
-                        block.status = BlockStatus::AwaitingDeletion
-                    })?;
+                    self.block_map
+                        .modify_block_metadata(block.id, |block| {
+                            block.status = BlockStatus::AwaitingDeletion
+                        })
+                        .await?;
                     proto_blocks.push(ProtoBlockMetadata {
                         block_id: block.id.to_string(),
                         seq: block.seq,

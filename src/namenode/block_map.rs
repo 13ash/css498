@@ -3,7 +3,7 @@ use crate::error::RSHDFSError;
 
 use std::collections::HashMap;
 
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Central data-structure used by the NameNode to track block locations.
@@ -20,17 +20,14 @@ impl BlockMap {
     }
 
     /// Adds a block to the BlockMap.
-    pub fn add_block(&self, block: BlockMetadata) {
-        let mut blocks = self.blocks.write().unwrap();
+    pub async fn add_block(&self, block: BlockMetadata) {
+        let mut blocks = self.blocks.write().await;
         blocks.insert(block.id, block);
     }
 
     /// Retrieves a block and its associated DataNodes.
-    pub fn get_block(&self, block_id: Uuid) -> Result<BlockMetadata, RSHDFSError> {
-        let blocks_guard = self
-            .blocks
-            .read()
-            .map_err(|_| RSHDFSError::LockError(String::from("Failed to acquire read lock")))?;
+    pub async fn get_block(&self, block_id: Uuid) -> Result<BlockMetadata, RSHDFSError> {
+        let blocks_guard = self.blocks.read().await;
 
         match blocks_guard.get(&block_id) {
             None => Err(RSHDFSError::BlockMapError(String::from("Block not found."))),
@@ -38,14 +35,15 @@ impl BlockMap {
         }
     }
 
-    pub fn modify_block_metadata<F>(&self, block_id: Uuid, modify: F) -> Result<(), RSHDFSError>
+    pub async fn modify_block_metadata<F>(
+        &self,
+        block_id: Uuid,
+        modify: F,
+    ) -> Result<(), RSHDFSError>
     where
         F: FnOnce(&mut BlockMetadata),
     {
-        let mut blocks_guard = self
-            .blocks
-            .write()
-            .map_err(|_| RSHDFSError::LockError(String::from("Failed to acquire write lock")))?;
+        let mut blocks_guard = self.blocks.write().await;
 
         match blocks_guard.get_mut(&block_id) {
             None => Err(RSHDFSError::BlockMapError(String::from("Block not found"))),
@@ -56,11 +54,8 @@ impl BlockMap {
         }
     }
 
-    pub fn remove_block(&self, block_id: Uuid) -> Result<(), RSHDFSError> {
-        let mut blocks_guard = self
-            .blocks
-            .write()
-            .map_err(|_| RSHDFSError::LockError(String::from("Failed to acquire write lock")))?;
+    pub async fn remove_block(&self, block_id: Uuid) -> Result<(), RSHDFSError> {
+        let mut blocks_guard = self.blocks.write().await;
         match blocks_guard.remove(&block_id) {
             None => Err(RSHDFSError::BlockMapError(String::from("Block not found."))),
             Some(_) => Ok(()),

@@ -174,7 +174,7 @@ impl RSHDFSClient for Client {
             let buffer_size = block_buffer.len();
 
             for addr in block.datanodes.clone() {
-                let mut block_manager_client =
+                let mut datanode_client =
                     RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
                         .await
                         .map_err(|_| {
@@ -185,12 +185,12 @@ impl RSHDFSClient for Client {
                     block_id: block.block_id.clone(),
                     block_seq: block.seq,
                 });
-                let response = block_manager_client
+                let response = datanode_client
                     .start_block_stream(start_put_block_stream_request)
                     .await;
                 if response.is_err() {
                     println!("{:?}", response);
-                    return Err(RSHDFSError::WriteError("Failed to write.".to_string()));
+                    return Err(RSHDFSError::WriteError(response.err().unwrap().to_string()));
                 }
 
                 let (client, server) = mpsc::channel::<BlockChunk>(10);
@@ -224,10 +224,10 @@ impl RSHDFSClient for Client {
                     }
                 });
 
-                block_manager_client
+                datanode_client
                     .put_block_streamed(Request::new(receiver_stream))
                     .await
-                    .map_err(|e| RSHDFSError::GrpcError(e.to_string()))?;
+                    .map_err(|e| RSHDFSError::PutBlockStreamedError(e.message().to_string()))?;
             }
         }
 
