@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::config::namenode_config::NameNodeConfig;
 use crate::error::RSHDFSError;
-use crate::namenode::block_map::BlockMap;
+use crate::namenode::block_map::{BlockMap, BlockMapManager};
 
 use crate::proto::data_node_name_node_service_server::DataNodeNameNodeService;
 use crate::proto::rshdfs_name_node_service_server::RshdfsNameNodeService;
