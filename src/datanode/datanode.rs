@@ -27,8 +27,8 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 pub(crate) struct BlockInfo {
-    id: String,
-    seq: i32,
+    pub(crate) id: String,
+    pub(crate) seq: i32,
 }
 
 impl PartialEq<Self> for BlockInfo {
@@ -45,6 +45,7 @@ impl Hash for BlockInfo {
     }
 }
 
+#[derive(Default)]
 pub(crate) struct HealthMetrics {
     pub(crate) cpu_load: f32,
     pub(crate) memory_usage: u64,

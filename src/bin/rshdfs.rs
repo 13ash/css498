@@ -45,7 +45,7 @@ async fn main() -> Result<()> {
     let config = RSHDFSConfig::from_xml_file("/config/rshdfs.xml")?;
     let mut namenode_client =
         RshdfsNameNodeServiceClient::connect(format!("http://{}", config.namenode_address)).await?;
-    let rshdfs_client = Client::new();
+    let rshdfs_client = RSHDFSClient::from_config(config);
 
     match &args.command {
         Commands::Get { fp } => {

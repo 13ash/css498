@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <clientConfig>
     <namenode.address>namenode:50000</namenode.address>
+    <data.dir>/rshdfs/data</data.dir>
 </clientConfig>

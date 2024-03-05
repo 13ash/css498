@@ -14,9 +14,10 @@ use crate::proto::rshdfs_data_node_service_client::RshdfsDataNodeServiceClient;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
+use crate::config::rshdfs_config::RSHDFSConfig;
 
 #[async_trait]
-pub trait RSHDFSClient {
+pub trait Client {
     async fn get(&self, final_data_path: PathBuf, response: GetResponse)
         -> Result<(), RSHDFSError>;
     async fn put(
@@ -26,15 +27,21 @@ pub trait RSHDFSClient {
     ) -> Result<Vec<String>, RSHDFSError>;
 }
 
-pub struct Client;
-impl Client {
-    pub fn new() -> Self {
-        Client {}
+pub struct RSHDFSClient {
+    pub (crate) namenode_addr: String,
+    pub (crate) data_dir: String,
+}
+impl RSHDFSClient {
+    pub fn from_config(config: RSHDFSConfig) -> Self {
+        RSHDFSClient {
+            namenode_addr: config.namenode_address,
+            data_dir: config.data_dir,
+        }
     }
 }
 
 #[async_trait]
-impl RSHDFSClient for Client {
+impl Client for RSHDFSClient {
     async fn get(
         &self,
         final_data_path: PathBuf,
@@ -42,6 +49,7 @@ impl RSHDFSClient for Client {
     ) -> Result<(), RSHDFSError> {
         let mut block_map = HashMap::new();
         let block_metadata_vec = response.file_blocks;
+        let data_dir = self.data_dir.clone();
 
         for block in block_metadata_vec.iter() {
             let mut success = false;
@@ -81,7 +89,7 @@ impl RSHDFSClient for Client {
                 }
 
                 if success {
-                    let temp_file_path = format!("/tmp/{}.tmp", block.block_id);
+                    let temp_file_path = format!("{}/{}.tmp", data_dir, block.block_id);
                     let mut temp_file = File::create(&temp_file_path)
                         .await
                         .map_err(|e| RSHDFSError::IOError(e.to_string()))?;

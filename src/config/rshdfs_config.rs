@@ -6,6 +6,9 @@ use crate::error::RSHDFSError;
 pub struct RSHDFSConfig {
     #[serde(rename = "namenode.address")]
     pub namenode_address: String,
+
+    #[serde(rename = "data.dir")]
+    pub data_dir: String,
 }
 
 impl RSHDFSConfig {

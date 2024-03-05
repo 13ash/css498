@@ -5,7 +5,7 @@ mod tests {
     use crate::namenode::namenode::{DataNodeStatus, INode, NameNode};
     use crate::proto::data_node_name_node_service_client::DataNodeNameNodeServiceClient;
     use crate::proto::data_node_name_node_service_server::DataNodeNameNodeServiceServer;
-    use crate::proto::{BlockReportRequest, HeartBeatRequest, NodeHealthMetrics, PutFileResponse};
+    use crate::proto::{BlockReportRequest, GetResponse, HeartBeatRequest, NodeHealthMetrics, PutFileResponse};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -15,7 +15,8 @@ mod tests {
     use tokio_test::{assert_err, assert_ok};
     use tonic::transport::Server;
     use uuid::Uuid;
-    use crate::datanode::datanode::{DataNode, HealthMetrics};
+    use crate::config::rshdfs_config::RSHDFSConfig;
+    use crate::datanode::datanode::{BlockInfo, DataNode, HealthMetrics};
     use crate::error::RSHDFSError;
     use crate::error::RSHDFSError::PutBlockStreamedError;
     use crate::namenode;
@@ -29,11 +30,15 @@ mod tests {
     const DATANODE_HOSTNAME_PORT: &str = "127.0.0.1:50002";
     const DATANODE_DATA_DIR: &str = "src/tests/datanode/hdfs/data";
     const DATANODE_DATA_DIR_INVALID: &str = "src/tests/datanode/data";
+
+    const CLIENT_DATA_DIR: &str = "src/tests/rshdfs/data";
     const LOCALHOST_IPV4: &str = "127.0.0.1";
     const NAMENODE_DATA_DIR: &str = "hdfs/namenode";
     const TEST_BLOCK_ONE_ID: &str = "11111111-1111-1111-1111-111111111111";
 
     const TEST_BLOCK_TWO_ID: &str = "22222222-2222-2222-2222-222222222222";
+
+    const TEST_BLOCK_ID_GET: &str = "33333333-3333-3333-3333-333333333333";
 
     async fn start_namenode(namenode: Arc<NameNode>, port: u16) {
         tokio::spawn(async move {
@@ -232,7 +237,10 @@ mod tests {
         start_datanode(datanode, datanode_port).await;
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        let rshdfs_client = Client::new();
+        let rshdfs_client = RSHDFSClient::from_config(RSHDFSConfig {
+            namenode_address: format!("{}:{}", LOCALHOST_IPV4, namenode_port),
+            data_dir: CLIENT_DATA_DIR.to_string(),
+        });
 
         let local_file = File::open("src/tests/put_test.txt").await.unwrap();
         let block = crate::proto::BlockMetadata {
@@ -315,7 +323,10 @@ mod tests {
         start_datanode(datanode_invalid_data_dir, datanode_port).await;
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        let rshdfs_client = Client::new();
+        let rshdfs_client = RSHDFSClient::from_config(RSHDFSConfig {
+            namenode_address: format!("{}:{}", LOCALHOST_IPV4, namenode_port),
+            data_dir: CLIENT_DATA_DIR.to_string(),
+        });
 
         let local_file = File::open("src/tests/put_test.txt").await.unwrap();
         let block = crate::proto::BlockMetadata {
@@ -346,5 +357,77 @@ mod tests {
 
         let non_existent_datanode_file = File::open(format!("{}/{}_{}.dat", DATANODE_DATA_DIR, TEST_BLOCK_TWO_ID, 0)).await;
         assert_err!(non_existent_datanode_file);
+    }
+
+    #[tokio::test]
+    async fn test_get_valid() {
+        let datanode_port = 50009u16;
+        let namenode_port = 50010u16;
+
+        let namenode = Arc::new(NameNode {
+            id: Uuid::try_parse(NAMENODE_UUID).unwrap(),
+            data_dir: NAMENODE_DATA_DIR.to_string(),
+            ipc_address: Default::default(),
+            replication_factor: 1, // setting replication factor to 1 for this test
+            datanodes: RwLock::new(vec![namenode::namenode::DataNode {
+                id: Uuid::try_parse(DATANODE_UUID).unwrap(),
+                addr: DATANODE_HOSTNAME_PORT.to_string(),
+                status: DataNodeStatus::HEALTHY,
+            }]),
+            namespace: Arc::new(RwLock::new(INode::Directory {
+                path: PathBuf::from("/"),
+                children: HashMap::new(),
+            })),
+            block_map: BlockMap {
+                blocks: RwLock::new(HashMap::new()),
+            },
+        });
+
+        start_namenode(namenode.clone(), namenode_port).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        let datanode = DataNode {
+            id: Uuid::try_parse(DATANODE_UUID).unwrap(),
+            data_dir: DATANODE_DATA_DIR.to_string(),
+            hostname_port: DATANODE_HOSTNAME_PORT.to_string(),
+            datanode_namenode_service_client: Arc::new(Mutex::new(DataNodeNameNodeServiceClient::connect(format!("http://{}:{}", LOCALHOST_IPV4, namenode_port)).await.unwrap())),
+            blocks: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(Mutex::new(Default::default())),
+            heartbeat_interval: Default::default(),
+            block_report_interval: Default::default(),
+            metrics_interval: Default::default(),
+        };
+
+        datanode.blocks.write().await.insert(Uuid::try_parse(TEST_BLOCK_ID_GET).unwrap(), BlockInfo {
+            id: TEST_BLOCK_ID_GET.to_string(),
+            seq: 0,
+        });
+
+
+        start_datanode(datanode, datanode_port).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        let final_path = PathBuf::from(format!("{}/get_test.txt", CLIENT_DATA_DIR.to_string()));
+
+        let client = RSHDFSClient::from_config(RSHDFSConfig {
+            namenode_address: format!("{}:{}",LOCALHOST_IPV4, namenode_port),
+            data_dir: CLIENT_DATA_DIR.to_string(),
+        });
+        let test_block = crate::proto::BlockMetadata {
+            block_id: TEST_BLOCK_ID_GET.to_string(),
+            seq: 0,
+            datanodes: vec![format!("{}:{}", LOCALHOST_IPV4, datanode_port)],
+        };
+
+        let get_response = GetResponse {
+            file_blocks: vec![test_block],
+        };
+        let result = client.get(final_path, get_response).await;
+
+        assert_ok!(result);
+
+        let remove_result = tokio::fs::remove_file(format!("{}/get_test.txt", CLIENT_DATA_DIR)).await;
+        assert_ok!(remove_result);
+
     }
 }
