@@ -10,11 +10,11 @@ use tokio::sync::mpsc;
 use tonic::Request;
 
 use crate::block::{BLOCK_CHUNK_SIZE, BLOCK_SIZE};
+use crate::config::rshdfs_config::RSHDFSConfig;
 use crate::proto::rshdfs_data_node_service_client::RshdfsDataNodeServiceClient;
 use async_trait::async_trait;
 use std::path::PathBuf;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
-use crate::config::rshdfs_config::RSHDFSConfig;
 
 #[async_trait]
 pub trait Client {
@@ -28,8 +28,8 @@ pub trait Client {
 }
 
 pub struct RSHDFSClient {
-    pub (crate) namenode_addr: String,
-    pub (crate) data_dir: String,
+    pub(crate) namenode_addr: String,
+    pub(crate) data_dir: String,
 }
 impl RSHDFSClient {
     pub fn from_config(config: RSHDFSConfig) -> Self {
@@ -151,9 +151,7 @@ impl Client for RSHDFSClient {
             local_file
                 .seek(SeekFrom::Start(offset))
                 .await
-                .map_err(|_| {
-                    RSHDFSError::PutError(String::from("Failed to seek in file"))
-                })?;
+                .map_err(|_| RSHDFSError::PutError(String::from("Failed to seek in file")))?;
 
             let mut block_buffer = vec![0; BLOCK_SIZE];
             let mut total_read = 0;
@@ -165,9 +163,10 @@ impl Client for RSHDFSClient {
                 }
 
                 let mut read_buffer = vec![0; MAX_READ_BUFFER_SIZE];
-                let read_bytes = local_file.read(&mut read_buffer).await.map_err(|_| {
-                    RSHDFSError::PutError(String::from("Failed to read from file"))
-                })?;
+                let read_bytes = local_file
+                    .read(&mut read_buffer)
+                    .await
+                    .map_err(|_| RSHDFSError::PutError(String::from("Failed to read from file")))?;
 
                 if read_bytes == 0 {
                     break; // EOF reached
@@ -185,9 +184,7 @@ impl Client for RSHDFSClient {
                 let mut datanode_client =
                     RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
                         .await
-                        .map_err(|_| {
-                            RSHDFSError::PutError(String::from("unable to connect"))
-                        })?;
+                        .map_err(|_| RSHDFSError::PutError(String::from("unable to connect")))?;
 
                 let start_put_block_stream_request = Request::new(BlockStreamInfo {
                     block_id: block.block_id.clone(),

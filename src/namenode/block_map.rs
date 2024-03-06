@@ -1,8 +1,8 @@
 use crate::block::BlockMetadata;
 use crate::error::RSHDFSError;
 
-use std::collections::HashMap;
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -36,8 +36,8 @@ impl BlockMap {
         block_id: Uuid,
         modify: F,
     ) -> Result<(), RSHDFSError>
-        where
-            F: FnOnce(&mut BlockMetadata),
+    where
+        F: FnOnce(&mut BlockMetadata),
     {
         let mut blocks_guard = self.blocks.write().await;
 
@@ -70,8 +70,6 @@ impl BlockMapManager for BlockMap {
         }
     }
 
-
-
     async fn remove_block(&self, block_id: Uuid) -> Result<(), RSHDFSError> {
         let mut blocks_guard = self.blocks.write().await;
         match blocks_guard.remove(&block_id) {
@@ -83,31 +81,42 @@ impl BlockMapManager for BlockMap {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
     use crate::block::{BlockMetadata, BlockStatus};
     use crate::error::RSHDFSError;
     use crate::namenode::block_map::{BlockMapManager, MockBlockMap};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn remove_block_expects_block_not_found() {
         let test_block_id = Uuid::new_v4();
         let mut mock_block_map = MockBlockMap::new();
-        mock_block_map.expect_remove_block().times(1).returning(|_block_uuid| Err(RSHDFSError::BlockMapError("Block not found.".to_string())));
+        mock_block_map
+            .expect_remove_block()
+            .times(1)
+            .returning(|_block_uuid| {
+                Err(RSHDFSError::BlockMapError("Block not found.".to_string()))
+            });
 
         let result = mock_block_map.remove_block(test_block_id).await;
 
-        assert_eq!(result, Err(RSHDFSError::BlockMapError("Block not found.".to_string())))
+        assert_eq!(
+            result,
+            Err(RSHDFSError::BlockMapError("Block not found.".to_string()))
+        )
     }
 
     #[tokio::test]
     async fn remove_block_expects_success() {
         let test_block_id = Uuid::new_v4();
         let mut mock_block_map = MockBlockMap::new();
-        mock_block_map.expect_remove_block().times(1).returning(|_block_uuid| Ok(()));
+        mock_block_map
+            .expect_remove_block()
+            .times(1)
+            .returning(|_block_uuid| Ok(()));
 
         let result = mock_block_map.remove_block(test_block_id).await;
 
-        assert_eq!(result,Ok(()))
+        assert_eq!(result, Ok(()))
     }
 
     #[tokio::test]
@@ -122,17 +131,21 @@ mod tests {
         };
         let mut mock_block_map = MockBlockMap::new();
 
-        mock_block_map.expect_get_block().times(1).returning(|_uuid| Ok(BlockMetadata {
-            id:  Uuid::try_parse("11111111-1111-1111-1111-111111111111").unwrap(),
-            seq: 0,
-            status: BlockStatus::Waiting,
-            size: 100,
-            datanodes: vec![],
-        }));
+        mock_block_map
+            .expect_get_block()
+            .times(1)
+            .returning(|_uuid| {
+                Ok(BlockMetadata {
+                    id: Uuid::try_parse("11111111-1111-1111-1111-111111111111").unwrap(),
+                    seq: 0,
+                    status: BlockStatus::Waiting,
+                    size: 100,
+                    datanodes: vec![],
+                })
+            });
 
         let result = mock_block_map.get_block(test_block_id).await;
         assert_eq!(result, Ok(test_block));
-
     }
 
     #[tokio::test]
@@ -140,9 +153,16 @@ mod tests {
         let test_block_id = Uuid::try_parse("11111111-1111-1111-1111-111111111111").unwrap();
         let mut mock_block_map = MockBlockMap::new();
 
-        mock_block_map.expect_get_block().times(1).returning(|_block_uuid| Err(RSHDFSError::BlockMapError("Block not found.".to_string())));
+        mock_block_map
+            .expect_get_block()
+            .times(1)
+            .returning(|_block_uuid| {
+                Err(RSHDFSError::BlockMapError("Block not found.".to_string()))
+            });
         let result = mock_block_map.get_block(test_block_id).await;
-        assert_eq!(result, Err(RSHDFSError::BlockMapError("Block not found.".to_string())));
-
+        assert_eq!(
+            result,
+            Err(RSHDFSError::BlockMapError("Block not found.".to_string()))
+        );
     }
 }

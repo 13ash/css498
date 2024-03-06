@@ -283,12 +283,20 @@ impl RshdfsDataNodeService for DataNode {
         );
         let mut file = match File::create(&file_path).await {
             Ok(file) => file,
-            Err(e) => return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!("Failed to create file: {}", e)))),
+            Err(e) => {
+                return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!(
+                    "Failed to create file: {}",
+                    e
+                ))))
+            }
         };
 
         // Write the first chunk's data to the file
         if let Err(e) = file.write_all(&first_chunk.chunked_data).await {
-            return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!("Failed to write to file: {}", e))));
+            return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!(
+                "Failed to write to file: {}",
+                e
+            ))));
         }
 
         // Loop to process remaining chunks
@@ -296,7 +304,12 @@ impl RshdfsDataNodeService for DataNode {
         while let Some(chunk_result) = stream.next().await {
             let block_chunk = match chunk_result {
                 Ok(chunk) => chunk,
-                Err(e) => return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!("Failed to read chunk: {}", e)))),
+                Err(e) => {
+                    return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!(
+                        "Failed to read chunk: {}",
+                        e
+                    ))))
+                }
             };
 
             // Validate the block_chunk
@@ -307,13 +320,16 @@ impl RshdfsDataNodeService for DataNode {
             if block_chunk.checksum == checksum && seq == block_chunk.chunk_seq {
                 // Write the chunk's data to the file
                 if let Err(e) = file.write_all(&block_chunk.chunked_data).await {
-                    return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!("Failed to write to file: {}", e))));
+                    return Err(Status::from(RSHDFSError::PutBlockStreamedError(format!(
+                        "Failed to write to file: {}",
+                        e
+                    ))));
                 }
                 seq += 1;
-            }
-
-            else {
-                return Err(Status::from(RSHDFSError::PutBlockStreamedError("Checksum mismatch".to_string())))
+            } else {
+                return Err(Status::from(RSHDFSError::PutBlockStreamedError(
+                    "Checksum mismatch".to_string(),
+                )));
             }
         }
 
@@ -332,20 +348,26 @@ impl RshdfsDataNodeService for DataNode {
     ) -> Result<Response<Self::GetBlockStreamedStream>, Status> {
         let inner_request = request.into_inner();
         let block_id = inner_request.block_id;
-        let block_id_uuid = Uuid::parse_str(&block_id)
-            .map_err(|_| Status::from(RSHDFSError::GetBlockStreamedError("Invalid UUID format.".to_string())))?;
+        let block_id_uuid = Uuid::parse_str(&block_id).map_err(|_| {
+            Status::from(RSHDFSError::GetBlockStreamedError(
+                "Invalid UUID format.".to_string(),
+            ))
+        })?;
 
         let blocks_guard = self.blocks.read().await;
-        let block_info = blocks_guard
-            .get(&block_id_uuid)
-            .ok_or(Status::from(RSHDFSError::GetBlockStreamedError("Block not found.".to_string())))?;
+        let block_info = blocks_guard.get(&block_id_uuid).ok_or(Status::from(
+            RSHDFSError::GetBlockStreamedError("Block not found.".to_string()),
+        ))?;
         let block_info_seq = block_info.seq;
         let file_path = PathBuf::from(format!(
             "{}/{}_{}.dat",
             self.data_dir, block_id, block_info_seq
         ));
         let mut file = File::open(&file_path).await.map_err(|_| {
-            Status::from(RSHDFSError::GetBlockStreamedError(format!("File at {:?} cannot be opened.", file_path)))
+            Status::from(RSHDFSError::GetBlockStreamedError(format!(
+                "File at {:?} cannot be opened.",
+                file_path
+            )))
         })?;
 
         let (sender, receiver) = mpsc::channel(15);
