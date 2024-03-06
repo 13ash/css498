@@ -408,6 +408,7 @@ impl NamespaceManager for NameNode {
     }
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait]
 impl DatanodeManager for NameNode {
     async fn select_datanodes(&self) -> Result<Vec<String>, RSHDFSError> {
@@ -666,7 +667,9 @@ impl RshdfsNameNodeService for Arc<NameNode> {
 #[cfg(test)]
 mod tests {
     use crate::error::RSHDFSError;
-    use crate::namenode::namenode::{INode, MockNamespaceManager, NamespaceManager};
+    use crate::namenode::namenode::{
+        DatanodeManager, INode, MockDatanodeManager, MockNamespaceManager, NamespaceManager,
+    };
     use std::collections::HashMap;
     use std::path::PathBuf;
 
@@ -780,6 +783,57 @@ mod tests {
         assert_eq!(
             result,
             Err(RSHDFSError::InvalidPathError(String::from("Empty path")))
+        );
+    }
+
+    #[tokio::test]
+    async fn select_datanodes_expects_insufficient_data_nodes_() {
+        let mut mock_datanode_manager = MockDatanodeManager::new();
+        mock_datanode_manager
+            .expect_select_datanodes()
+            .times(1)
+            .returning(|| {
+                Err(RSHDFSError::InsufficientDataNodes(
+                    "Not enough healthy datanodes".to_string(),
+                ))
+            });
+
+        let result = mock_datanode_manager.select_datanodes().await;
+
+        assert_eq!(
+            result,
+            Err(RSHDFSError::InsufficientDataNodes(
+                "Not enough healthy datanodes".to_string()
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn select_datanodes_expects_success() {
+        let datanode1_addr = "datanode1:50002".to_string();
+        let datanode2_addr = "datanode2:50002".to_string();
+        let datanode3_addr = "datanode3:50002".to_string();
+        let mut mock_datanode_manager = MockDatanodeManager::new();
+        mock_datanode_manager
+            .expect_select_datanodes()
+            .times(1)
+            .returning(move || {
+                Ok(vec![
+                    datanode1_addr.clone(),
+                    datanode2_addr.clone(),
+                    datanode3_addr.clone(),
+                ])
+            });
+
+        let result = mock_datanode_manager.select_datanodes().await;
+
+        assert_eq!(
+            result,
+            Ok(vec![
+                "datanode1:50002".to_string(),
+                "datanode2:50002".to_string(),
+                "datanode3:50002".to_string()
+            ])
         );
     }
 }
