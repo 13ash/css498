@@ -11,6 +11,7 @@ pub enum RSHDFSError {
     TonicError(String),
     ProtoError(String),
     PutBlockStreamedError(String),
+    GetBlockStreamedError(String),
     FileSystemError(String),
     InvalidPathError(String),
     IOError(String),
@@ -28,6 +29,8 @@ pub enum RSHDFSError {
     StreamError(String),
     UUIDError(String),
     BlockReportError(String),
+    GetError(String),
+    PutError(String),
 }
 
 impl From<tonic::transport::Error> for RSHDFSError {
@@ -79,6 +82,8 @@ impl From<RSHDFSError> for Status {
             RSHDFSError::FileSystemError(msg) => Status::internal(msg),
             RSHDFSError::LockError(msg) => Status::aborted(msg),
             RSHDFSError::PutBlockStreamedError(msg) => Status::internal(msg),
+            RSHDFSError::GetBlockStreamedError(msg) => Status::internal(msg),
+            RSHDFSError::IOError(msg) => Status::internal(msg),
             _ => Status::unknown("Unknown error"),
         }
     }

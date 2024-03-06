@@ -66,7 +66,7 @@ impl Client for RSHDFSClient {
                 let mut stream = datanode_client
                     .get_block_streamed(Request::new(get_block_request))
                     .await
-                    .map_err(|e| RSHDFSError::GrpcError(e.to_string()))?
+                    .map_err(|e| RSHDFSError::GetError(e.message().to_string()))?
                     .into_inner();
 
                 let mut block_buffer = Vec::new();
@@ -74,7 +74,7 @@ impl Client for RSHDFSClient {
                 while let Some(chunk_result) = stream
                     .message()
                     .await
-                    .map_err(|e| RSHDFSError::GrpcError(e.to_string()))?
+                    .map_err(|e| RSHDFSError::GetError(e.message().to_string()))?
                 {
                     let chunk = chunk_result;
                     let mut adler = Adler32::new();
@@ -152,7 +152,7 @@ impl Client for RSHDFSClient {
                 .seek(SeekFrom::Start(offset))
                 .await
                 .map_err(|_| {
-                    RSHDFSError::FileSystemError(String::from("Failed to seek in file"))
+                    RSHDFSError::PutError(String::from("Failed to seek in file"))
                 })?;
 
             let mut block_buffer = vec![0; BLOCK_SIZE];
@@ -166,7 +166,7 @@ impl Client for RSHDFSClient {
 
                 let mut read_buffer = vec![0; MAX_READ_BUFFER_SIZE];
                 let read_bytes = local_file.read(&mut read_buffer).await.map_err(|_| {
-                    RSHDFSError::FileSystemError(String::from("Failed to read from file"))
+                    RSHDFSError::PutError(String::from("Failed to read from file"))
                 })?;
 
                 if read_bytes == 0 {
@@ -186,7 +186,7 @@ impl Client for RSHDFSClient {
                     RshdfsDataNodeServiceClient::connect(format!("http://{}", addr))
                         .await
                         .map_err(|_| {
-                            RSHDFSError::ConnectionError(String::from("unable to connect"))
+                            RSHDFSError::PutError(String::from("unable to connect"))
                         })?;
 
                 let start_put_block_stream_request = Request::new(BlockStreamInfo {
@@ -198,7 +198,7 @@ impl Client for RSHDFSClient {
                     .await;
                 if response.is_err() {
                     println!("{:?}", response);
-                    return Err(RSHDFSError::WriteError(response.err().unwrap().to_string()));
+                    return Err(RSHDFSError::PutError(response.err().unwrap().to_string()));
                 }
 
                 let (client, server) = mpsc::channel::<BlockChunk>(10);
@@ -235,7 +235,7 @@ impl Client for RSHDFSClient {
                 datanode_client
                     .put_block_streamed(Request::new(receiver_stream))
                     .await
-                    .map_err(|e| RSHDFSError::PutBlockStreamedError(e.message().to_string()))?;
+                    .map_err(|e| RSHDFSError::PutError(e.message().to_string()))?;
             }
         }
 

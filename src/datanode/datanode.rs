@@ -333,21 +333,19 @@ impl RshdfsDataNodeService for DataNode {
         let inner_request = request.into_inner();
         let block_id = inner_request.block_id;
         let block_id_uuid = Uuid::parse_str(&block_id)
-            .map_err(|_| Status::invalid_argument("Invalid UUID format."))?;
+            .map_err(|_| Status::from(RSHDFSError::GetBlockStreamedError("Invalid UUID format.".to_string())))?;
 
         let blocks_guard = self.blocks.read().await;
         let block_info = blocks_guard
             .get(&block_id_uuid)
-            .ok_or(RSHDFSError::FileSystemError(String::from(
-                "Block not found.",
-            )))?;
+            .ok_or(Status::from(RSHDFSError::GetBlockStreamedError("Block not found.".to_string())))?;
         let block_info_seq = block_info.seq;
         let file_path = PathBuf::from(format!(
             "{}/{}_{}.dat",
             self.data_dir, block_id, block_info_seq
         ));
         let mut file = File::open(&file_path).await.map_err(|_| {
-            RSHDFSError::ReadError(format!("File at {:?} cannot be opened.", file_path))
+            Status::from(RSHDFSError::GetBlockStreamedError(format!("File at {:?} cannot be opened.", file_path)))
         })?;
 
         let (sender, receiver) = mpsc::channel(15);
