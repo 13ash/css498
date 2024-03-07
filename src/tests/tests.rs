@@ -5,7 +5,6 @@ mod tests {
     use crate::datanode::datanode::{BlockInfo, DataNode, HealthMetrics};
     use crate::error::RSHDFSError::PutError;
     use crate::namenode;
-    use crate::namenode::block_map::BlockMap;
     use crate::namenode::namenode::{DataNodeStatus, INode, NameNode};
     use crate::proto::data_node_name_node_service_client::DataNodeNameNodeServiceClient;
     use crate::proto::data_node_name_node_service_server::DataNodeNameNodeServiceServer;
@@ -65,13 +64,13 @@ mod tests {
             ipc_address: Default::default(),
             replication_factor: 3,
             datanodes: RwLock::new(Vec::new()),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: RwLock::new(Default::default()),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         let port = 50001u16;
@@ -105,13 +104,13 @@ mod tests {
             ipc_address: Default::default(),
             replication_factor: 3,
             datanodes: RwLock::new(Vec::new()),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: Default::default(),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         let port = 50002u16;
@@ -152,17 +151,17 @@ mod tests {
             ipc_address: Default::default(),
             replication_factor: 3,
             datanodes: RwLock::new(Vec::new()),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: Default::default(),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
-        let mut block_map_guard = namenode.block_map.blocks.write().await;
-        block_map_guard.insert(
+        let mut block_map_guard = namenode.block_map.write().await;
+        block_map_guard.blocks.insert(
             Uuid::try_parse(TEST_BLOCK_PUT_ID_ONE).unwrap(),
             test_block_one_awaiting_deletion.clone(),
         );
@@ -203,13 +202,13 @@ mod tests {
                 addr: DATANODE_HOSTNAME_PORT.to_string(),
                 status: DataNodeStatus::HEALTHY,
             }]),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: Default::default(),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         start_namenode(namenode.clone(), namenode_port).await;
@@ -305,13 +304,13 @@ mod tests {
                 addr: DATANODE_HOSTNAME_PORT.to_string(),
                 status: DataNodeStatus::HEALTHY,
             }]),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: Default::default(),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         start_namenode(namenode.clone(), namenode_port).await;
@@ -405,13 +404,13 @@ mod tests {
                 addr: DATANODE_HOSTNAME_PORT.to_string(),
                 status: DataNodeStatus::HEALTHY,
             }]),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: Default::default(),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         start_namenode(namenode.clone(), namenode_port).await;
@@ -545,13 +544,13 @@ mod tests {
                 addr: DATANODE_HOSTNAME_PORT.to_string(),
                 status: DataNodeStatus::HEALTHY,
             }]),
-            namespace: Arc::new(RwLock::new(INode::Directory {
+            namespace: RwLock::new(INode::Directory {
                 path: PathBuf::from("/"),
                 children: HashMap::new(),
-            })),
-            block_map: BlockMap {
-                blocks: RwLock::new(HashMap::new()),
-            },
+            }),
+            edit_log: RwLock::new(Default::default()),
+            block_map: RwLock::new(Default::default()),
+            flush_interval: 30000,
         });
 
         start_namenode(namenode.clone(), namenode_port).await;

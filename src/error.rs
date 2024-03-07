@@ -27,6 +27,7 @@ pub enum RSHDFSError {
     DataValidationError(String),
     GrpcError(String),
     StreamError(String),
+    EditLogError(String),
     UUIDError(String),
     BlockReportError(String),
     GetError(String),

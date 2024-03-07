@@ -11,6 +11,9 @@ pub struct NameNodeConfig {
 
     #[serde(rename = "replication.factor")]
     pub replication_factor: i8,
+
+    #[serde(rename = "edit.log.flush.interval")]
+    pub flush_interval: u64,
 }
 
 impl NameNodeConfig {

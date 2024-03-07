@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use std::path::{Component, Path, PathBuf};
 
 use crate::block::{BlockMetadata, BlockStatus, BLOCK_SIZE};
@@ -23,8 +22,10 @@ use crate::proto::{
     WriteBlockUpdateRequest, WriteBlockUpdateResponse,
 };
 
+use crate::namenode::edit_log::{EditLog, EditLogManager, Operation};
 #[cfg(test)]
 use mockall::automock;
+
 #[derive(Debug, Clone)]
 pub enum INode {
     Directory {
@@ -110,8 +111,10 @@ pub struct NameNode {
     pub ipc_address: String,
     pub replication_factor: i8,
     pub datanodes: RwLock<Vec<DataNode>>,
-    pub namespace: Arc<RwLock<INode>>,
-    pub block_map: BlockMap,
+    pub namespace: RwLock<INode>,
+    pub edit_log: RwLock<EditLog>,
+    pub block_map: RwLock<BlockMap>,
+    pub flush_interval: u64,
 }
 
 impl NameNode {
@@ -123,15 +126,23 @@ impl NameNode {
             children: HashMap::new(),
         };
 
+        let edit_log_file_path = PathBuf::from(format!("{}/edit_log.log", config.data_dir.clone()));
+
         Ok(NameNode {
             id,
             data_dir: config.data_dir,
             ipc_address: config.ipc_address,
             datanodes: RwLock::new(Vec::new()),
-            namespace: Arc::new(RwLock::new(root)),
-            block_map: BlockMap::new(),
+            namespace: RwLock::new(root),
+            block_map: RwLock::new(BlockMap::new()),
+            edit_log: RwLock::new(EditLog::new(edit_log_file_path)),
             replication_factor: config.replication_factor,
+            flush_interval: config.flush_interval,
         })
+    }
+
+    pub async fn flush_edit_log(&self) {
+        self.edit_log.write().await.flush().await.expect("failed to flush edit log.");
     }
 
     fn traverse_to_inode<'a>(
@@ -620,6 +631,8 @@ impl RshdfsNameNodeService for Arc<NameNode> {
                     .await?;
                 for block in file_blocks {
                     self.block_map
+                        .write()
+                        .await
                         .modify_block_metadata(block.id, |block| {
                             block.status = BlockStatus::AwaitingDeletion
                         })
@@ -630,11 +643,17 @@ impl RshdfsNameNodeService for Arc<NameNode> {
                         datanodes: block.datanodes.clone(),
                     })
                 }
-                println!("{:?}", proto_blocks);
 
-                Ok(Response::new(DeleteFileResponse {
-                    file_blocks: proto_blocks,
-                }))
+                let mut edit_log_guard = self.edit_log.write().await;
+                match edit_log_guard
+                    .insert_entry(Operation::DELETE, PathBuf::from(path))
+                    .await
+                {
+                    Ok(_) => Ok(Response::new(DeleteFileResponse {
+                        file_blocks: proto_blocks,
+                    })),
+                    Err(e) => return Err(Status::from(e)),
+                }
             }
             Err(e) => Err(Status::from(e)),
         }
@@ -658,7 +677,19 @@ impl RshdfsNameNodeService for Arc<NameNode> {
             .add_inode_to_namespace(PathBuf::from(inner_request.path.clone()), new_file)
             .await
         {
-            Ok(_) => Ok(Response::new(ConfirmFilePutResponse { success: true })),
+            Ok(_) => {
+                match self
+                    .edit_log
+                    .write()
+                    .await
+                    .insert_entry(Operation::PUT, PathBuf::from(inner_request.path.clone()))
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => return Err(Status::from(e)),
+                };
+                Ok(Response::new(ConfirmFilePutResponse { success: true }))
+            }
             Err(e) => Err(Status::from(e)),
         }
     }
