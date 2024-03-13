@@ -26,9 +26,9 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info};
 use uuid::Uuid;
 
-pub(crate) struct BlockInfo {
-    pub(crate) id: String,
-    pub(crate) seq: i32,
+pub struct BlockInfo {
+    pub id: String,
+    pub seq: i32,
 }
 
 impl PartialEq<Self> for BlockInfo {
@@ -46,7 +46,7 @@ impl Hash for BlockInfo {
 }
 
 #[derive(Default)]
-pub(crate) struct HealthMetrics {
+pub struct HealthMetrics {
     pub(crate) cpu_load: f32,
     pub(crate) memory_usage: u64,
     pub(crate) disk_space: u64,
@@ -64,15 +64,15 @@ impl HealthMetrics {
 
 /// Represents a DataNode in a distributed file system.
 pub struct DataNode {
-    pub(crate) id: Uuid,
-    pub(crate) data_dir: String,
-    pub(crate) hostname_port: String,
-    pub(crate) datanode_namenode_service_client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
-    pub(crate) blocks: Arc<RwLock<HashMap<Uuid, BlockInfo>>>,
-    pub(crate) metrics: Arc<Mutex<HealthMetrics>>,
-    pub(crate) heartbeat_interval: Duration,
-    pub(crate) block_report_interval: Duration,
-    pub(crate) metrics_interval: Duration,
+    pub id: Uuid,
+    pub data_dir: String,
+    pub hostname_port: String,
+    pub datanode_namenode_service_client: Arc<Mutex<DataNodeNameNodeServiceClient<Channel>>>,
+    pub blocks: Arc<RwLock<HashMap<Uuid, BlockInfo>>>,
+    pub metrics: Arc<Mutex<HealthMetrics>>,
+    pub heartbeat_interval: Duration,
+    pub block_report_interval: Duration,
+    pub metrics_interval: Duration,
 }
 
 impl DataNode {

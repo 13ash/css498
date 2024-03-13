@@ -194,8 +194,7 @@ impl Client for RSHDFSClient {
                     .start_block_stream(start_put_block_stream_request)
                     .await;
                 if response.is_err() {
-                    println!("{:?}", response);
-                    return Err(RSHDFSError::PutError(response.err().unwrap().to_string()));
+                    return Err(RSHDFSError::PutError("Failed to start block stream.".to_string()));
                 }
 
                 let (client, server) = mpsc::channel::<BlockChunk>(10);

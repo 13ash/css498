@@ -84,6 +84,7 @@ impl From<RSHDFSError> for Status {
             RSHDFSError::LockError(msg) => Status::aborted(msg),
             RSHDFSError::PutBlockStreamedError(msg) => Status::internal(msg),
             RSHDFSError::GetBlockStreamedError(msg) => Status::internal(msg),
+            RSHDFSError::PutError(msg) => Status::internal(msg),
             RSHDFSError::IOError(msg) => Status::internal(msg),
             _ => Status::unknown("Unknown error"),
         }

@@ -1,0 +1,2 @@
+/bench/bench.txt filter=lfs diff=lfs merge=lfs -text
+/bench/datanode1/0aa9e0ce-6edc-4058-8626-7816681751c1_0.dat filter=lfs diff=lfs merge=lfs -text
